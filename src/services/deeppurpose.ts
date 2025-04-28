@@ -13,22 +13,24 @@ import {z} from 'zod';
 /**
  * Represents the result from the DeepPurpose analysis.
  */
-export interface DeepPurposeResult {
-  /**
-   * The predicted purpose or mechanism of action analysis.
-   */
-  predictedPurpose: string;
-  /**
-   * Confidence score (0-1) for the prediction, if available.
-   */
-  confidence?: number;
-}
+// export interface DeepPurposeResult { // REMOVE THIS
+//   /**
+//    * The predicted purpose or mechanism of action analysis.
+//    */
+//   predictedPurpose: string;
+//   /**
+//    * Confidence score (0-1) for the prediction, if available.
+//    */
+//   confidence?: number;
+// }
 
 // Export Zod schema for DeepPurposeResult interface
 export const DeepPurposeResultSchema = z.object({
   predictedPurpose: z.string().describe('The predicted purpose or mechanism of action analysis.'),
   confidence: z.number().optional().describe('Confidence score (0-1) for the prediction, if available.'),
 });
+
+export type DeepPurposeResult = z.infer<typeof DeepPurposeResultSchema>;
 
 const deeppurposePrompt = ai.definePrompt({
   name: 'deeppurposePrompt',
