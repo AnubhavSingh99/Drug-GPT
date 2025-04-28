@@ -12,6 +12,7 @@ import {ai} from '@/ai/ai-instance';
 import {z} from 'genkit';
 import {getMoleculeBySmiles} from '@/services/pubchem';
 import {getDrugByName} from '@/services/drugbank';
+import { getDeepPurposeAnalysis } from '@/services/deeppurpose'; // Import the new service
 
 const AnalyzeDrugCandidateInputSchema = z.object({
   smiles: z
@@ -36,7 +37,7 @@ export async function analyzeDrugCandidate(input: AnalyzeDrugCandidateInput): Pr
 
 const pubChemTool = ai.defineTool({
   name: 'getMoleculeBySmiles',
-  description: 'Retrieves molecule information from PubChem based on a SMILES string.',
+  description: 'Retrieves basic molecule information (CID, formula, IUPAC name, canonical SMILES, molecular weight) from PubChem based on a SMILES string. Should be the first step for chemical data gathering.',
   inputSchema: z.object({
     smiles: z.string().describe('The SMILES string of the molecule to search for.'),
   }),
@@ -50,18 +51,21 @@ const pubChemTool = ai.defineTool({
 },
 async input => {
   const molecule = await getMoleculeBySmiles(input.smiles);
-  if (!molecule) {
-    throw new Error(`Molecule with SMILES ${input.smiles} not found in PubChem.`);
-  }
+  // Let the LLM handle the case where the tool returns null, rather than throwing here.
+  // It can inform the user that PubChem data wasn't found.
   return molecule;
+  // if (!molecule) {
+  //   throw new Error(`Molecule with SMILES ${input.smiles} not found in PubChem.`);
+  // }
+  // return molecule;
 }
 );
 
 const drugBankTool = ai.defineTool({
   name: 'getDrugByName',
-  description: 'Retrieves drug information from DrugBank based on the drug name. Useful if the SMILES string corresponds to a known drug or if the user mentions a specific drug.',
+  description: 'Retrieves known drug information from DrugBank based on a drug name. Use this tool if the molecule identified by PubChem has an IUPAC name that suggests it might be a known drug, or if the user\'s query explicitly mentions a drug name.',
   inputSchema: z.object({
-    drugName: z.string().describe('The name of the drug to search for.'),
+    drugName: z.string().describe('The name of the drug to search for in DrugBank.'),
   }),
   outputSchema: z.object({
     drugbankId: z.string().describe('The DrugBank ID.'),
@@ -73,16 +77,37 @@ const drugBankTool = ai.defineTool({
 },
 async input => {
   const drug = await getDrugByName(input.drugName);
-  if (!drug) {
-    throw new Error(`Drug with name ${input.drugName} not found in DrugBank.`);
-  }
+   // Let the LLM handle the null case.
   return drug;
+  // if (!drug) {
+  //   throw new Error(`Drug with name ${input.drugName} not found in DrugBank.`);
+  // }
+  // return drug;
 }
 );
 
+// Define the DeepPurpose tool
+const deepPurposeTool = ai.defineTool({
+  name: 'getDeepPurposeAnalysis',
+  description: 'Predicts the potential purpose or mechanism of action for a given molecule based on its SMILES string using an AI model (DeepPurpose). Use this after obtaining basic molecule info from PubChem to gain deeper insights into its function, especially if the query asks about potential use, mechanism, or targets.',
+  inputSchema: z.object({
+    smiles: z.string().describe('The SMILES string of the molecule to analyze with DeepPurpose.'),
+  }),
+  outputSchema: z.object({
+     predictedPurpose: z.string().describe('The predicted purpose or mechanism of action analysis.'),
+     confidence: z.number().optional().describe('Confidence score (0-1) for the prediction, if available.'),
+  }),
+},
+async input => {
+  const analysis = await getDeepPurposeAnalysis(input.smiles);
+  // Let the LLM handle the null case.
+  return analysis;
+});
+
+
 const prompt = ai.definePrompt({
   name: 'analyzeDrugCandidatePrompt',
-  tools: [pubChemTool, drugBankTool],
+  tools: [pubChemTool, drugBankTool, deepPurposeTool], // Added deepPurposeTool
   input: {
     schema: z.object({
       smiles: z.string().describe('The SMILES string of the drug candidate.'),
@@ -92,7 +117,7 @@ const prompt = ai.definePrompt({
   },
   output: {
     schema: z.object({
-      analysis: z.string().describe('The analysis of the drug candidate.'),
+      analysis: z.string().describe('The comprehensive analysis of the drug candidate, incorporating information from all relevant tools used.'),
     }),
   },
   prompt: `You are an expert pharmaceutical researcher specializing in early-stage drug discovery analysis.
@@ -103,15 +128,16 @@ const prompt = ai.definePrompt({
   User Query: {{{query}}}
 
   Instructions:
-  1.  First, use the 'getMoleculeBySmiles' tool to retrieve basic chemical properties (like molecular weight, formula, IUPAC name if available) for the provided SMILES string. Reference this information in your analysis.
-  2.  If the molecule has an IUPAC name, consider using the 'getDrugByName' tool with that name (or parts of it) to see if it corresponds to a known drug in DrugBank. Also use this tool if the user's query explicitly mentions a known drug name. Integrate any relevant findings from DrugBank (like description or known uses) into your analysis.
-  3.  Address the user's specific query: "{{{query}}}".
-  4.  If a target protein ({{{targetProtein}}}) was provided, specifically discuss the potential interaction, binding affinity (qualitatively if no data is available), or suitability of the candidate for this target, based on its structure and properties obtained from the tools. If no target was provided, focus on general properties, potential applications, or risks based on the query.
-  5.  Provide a concise yet informative analysis. Structure your response clearly. Include potential strengths, weaknesses, or areas for further investigation based on the available data.
-  6.  If the PubChem tool fails or returns no data for the SMILES string, state that clearly and indicate that the analysis is limited due to the lack of basic chemical information. You cannot proceed effectively without molecule data.
-  7.  If the DrugBank tool fails or finds no match for a name derived from PubChem or mentioned by the user, mention that the compound doesn't appear to be a registered drug under that name in the available data.
+  1.  **Gather Basic Data:** First, *always* use the 'getMoleculeBySmiles' tool with the provided SMILES string ({{{smiles}}}) to retrieve fundamental chemical properties (molecular weight, formula, IUPAC name, canonical SMILES). This information is crucial for any further analysis.
+      *   If the 'getMoleculeBySmiles' tool returns null or fails, state clearly that essential chemical information could not be retrieved from PubChem for the given SMILES string and that the analysis is severely limited or cannot proceed. Do not attempt to use other tools that rely on this basic data if it's missing.
+  2.  **Check Known Drugs (Conditional):** If 'getMoleculeBySmiles' was successful and returned an IUPAC name, consider using the 'getDrugByName' tool with that name (or significant parts of it) to check if the molecule corresponds to a known drug in DrugBank. Also, use 'getDrugByName' if the user's query explicitly mentions a known drug name. Integrate any relevant findings (like description or known uses) into your analysis. If the tool returns null, mention that the compound doesn't appear to be a registered drug under that name in the available data.
+  3.  **Predict Purpose (Conditional):** After successfully retrieving data with 'getMoleculeBySmiles', use the 'getDeepPurposeAnalysis' tool with the *original* SMILES string ({{{smiles}}}) to predict its potential purpose or mechanism of action. This provides deeper functional insight. Integrate this prediction (and confidence score, if available) into your analysis. If the tool returns null, mention that a purpose prediction could not be obtained.
+  4.  **Address User Query:** Directly address the user's specific query: "{{{query}}}", synthesizing information from all the tools used.
+  5.  **Target Protein Analysis (Conditional):** If a target protein ({{{targetProtein}}}) was provided, specifically discuss the potential interaction, binding affinity (qualitatively, based on structure, properties, and predicted purpose), or suitability of the candidate for this target. Relate findings from PubChem and DeepPurpose to this specific target. If no target was provided, focus on the general properties, predicted purpose, potential applications, or risks based on the query and tool results.
+  6.  **Synthesize Analysis:** Provide a concise yet informative analysis. Structure your response clearly. Include potential strengths, weaknesses, or areas for further investigation based *only* on the data obtained from the tools. Clearly state which information comes from which tool (e.g., "PubChem indicates...", "DrugBank suggests...", "DeepPurpose predicts...").
+  7.  **Handle Tool Failures Gracefully:** If any tool other than the initial 'getMoleculeBySmiles' call fails or returns null, mention this limitation in the relevant part of your analysis (e.g., "Could not retrieve DrugBank information," "DeepPurpose analysis was inconclusive"). Do not hallucinate information if a tool fails.
 
-  Return only the final analysis as a single string in the 'analysis' field.
+  Return only the final, synthesized analysis as a single string in the 'analysis' field.
 `,
 });
 
@@ -124,6 +150,19 @@ const analyzeDrugCandidateFlow = ai.defineFlow<
   inputSchema: AnalyzeDrugCandidateInputSchema,
   outputSchema: AnalyzeDrugCandidateOutputSchema,
 }, async input => {
-  const {output} = await prompt(input);
-  return output!;
+  console.log('Starting analyzeDrugCandidateFlow with input:', input); // Add logging
+  try {
+     const {output} = await prompt(input);
+     console.log('analyzeDrugCandidateFlow received output from prompt:', output); // Add logging
+     if (!output) {
+        console.error('analyzeDrugCandidateFlow: Prompt returned null output.');
+        throw new Error('Analysis failed: No output received from the AI model.');
+     }
+     return output!;
+  } catch (error) {
+      console.error('Error during analyzeDrugCandidateFlow execution:', error); // Add logging
+      // Re-throw the error to be caught by the calling component
+      throw error;
+  }
+
 });
