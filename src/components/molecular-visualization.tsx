@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
+// Note: $3Dmol import remains, but the component itself is dynamically imported elsewhere.
 import $3Dmol from '3dmol'; // Import the standard 3Dmol library
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -29,13 +30,12 @@ export function MolecularVisualization({ smiles, isLoading }: MolecularVisualiza
   const glviewer = useRef<any>(null); // To store the viewer instance
 
   useEffect(() => {
-    // Ensure the viewer container exists
-    if (!viewerRef.current) return;
+    // Ensure the viewer container exists and $3Dmol is available (client-side check)
+    if (!viewerRef.current || typeof $3Dmol === 'undefined') return;
 
     // Cleanup previous viewer instance if smiles changes or component unmounts
     if (glviewer.current) {
-       // You might need a more specific cleanup method depending on 3Dmol.js version or context
-       // For simplicity, clearing the container might suffice if no explicit destroy method is used/available.
+       // $3Dmol doesn't have a standard destroy method. Clearing the container is a common approach.
        viewerRef.current.innerHTML = '';
        glviewer.current = null;
     }
@@ -59,7 +59,9 @@ export function MolecularVisualization({ smiles, isLoading }: MolecularVisualiza
       }
     } else {
        // Clear the viewer area if smiles is null/undefined after being previously set
-       viewerRef.current.innerHTML = ''; // Clear previous rendering
+       if (viewerRef.current) {
+           viewerRef.current.innerHTML = ''; // Clear previous rendering
+       }
        glviewer.current = null;
     }
 
@@ -119,4 +121,3 @@ export function MolecularVisualization({ smiles, isLoading }: MolecularVisualiza
     </Card>
   );
 }
-

@@ -15,10 +15,34 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ResultsDisplay } from '@/components/results-display';
-import { MolecularVisualization } from '@/components/molecular-visualization'; // Import new component
+// import { MolecularVisualization } from '@/components/molecular-visualization'; // Import new component - REMOVED for dynamic import
 import { PubChemDetailsCard } from '@/components/pubchem-details-card'; // Import new component
 import { Loader2, TestTubeDiagonal, Target } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
+import dynamic from 'next/dynamic';
+import { Skeleton } from '@/components/ui/skeleton';
+
+// Dynamically import MolecularVisualization with SSR disabled
+const MolecularVisualization = dynamic(
+  () => import('@/components/molecular-visualization').then((mod) => mod.MolecularVisualization),
+  {
+    ssr: false,
+    loading: () => ( // Optional: Show a skeleton loader while the component loads
+      <Card className="shadow-md">
+        <CardHeader>
+          <CardTitle className="text-xl flex items-center">
+             {/* Placeholder Icon or Text */}
+             Loading Visualization...
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-64 w-full" />
+        </CardContent>
+      </Card>
+    ),
+  }
+);
+
 
 const formSchema = z.object({
   smiles: z.string().min(1, 'SMILES string is required.'),
@@ -200,7 +224,7 @@ export function AnalysisForm() {
         {/* PubChem Details Card */}
         <PubChemDetailsCard molecule={pubChemDetails} isLoading={isFetchingPubChem} />
 
-        {/* Molecular Visualization */}
+        {/* Molecular Visualization (Dynamically Imported) */}
         <MolecularVisualization
           smiles={pubChemDetails?.canonicalSmiles}
           isLoading={isFetchingPubChem}
