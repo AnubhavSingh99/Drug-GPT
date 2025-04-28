@@ -15,7 +15,6 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ResultsDisplay } from '@/components/results-display';
-// import { MolecularVisualization } from '@/components/molecular-visualization'; // Import new component - REMOVED for dynamic import
 import { PubChemDetailsCard } from '@/components/pubchem-details-card'; // Import new component
 import { Loader2, TestTubeDiagonal, Target } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
@@ -52,6 +51,16 @@ const formSchema = z.object({
 
 type FormData = z.infer<typeof formSchema>;
 
+// Simple regex to guess if a string might be a formula instead of SMILES
+// Looks for patterns like C#H#, or letters directly followed by numbers > 1
+// This is NOT a perfect SMILES validator, just a heuristic.
+const seemsLikeFormula = (input: string): boolean => {
+   // Check for common formula patterns (e.g., C6H12O6, CH3COOH)
+   // Allows single digits after letters, but flags multiple digits or letters following numbers.
+   if (/\s/.test(input)) return false; // SMILES usually don't have spaces
+   return /([A-Za-z][2-9])|([A-Za-z]\d{2,})|(\d[A-Za-z])/.test(input);
+};
+
 export function AnalysisForm() {
   const [analysisResult, setAnalysisResult] = useState<AnalyzeDrugCandidateOutput | null>(null);
   const [pubChemDetails, setPubChemDetails] = useState<Molecule | null>(null); // State for PubChem details
@@ -83,13 +92,18 @@ export function AnalysisForm() {
       setIsFetchingPubChem(false);
 
       if (!moleculeData) {
+        const inputIsLikelyFormula = seemsLikeFormula(values.smiles);
+        const errorDescription = inputIsLikelyFormula
+          ? `Invalid input: "${values.smiles}" looks like a molecular formula, not a SMILES string. Please provide a structural representation (e.g., 'c1ccccc1').`
+          : `Could not retrieve molecule details for SMILES: "${values.smiles}". Please ensure the SMILES string is valid and exists in PubChem.`;
+
         toast({
           variant: "destructive",
           title: "PubChem Error",
-          description: `Could not retrieve molecule details for SMILES: ${values.smiles}. Please check the SMILES string.`,
+          description: errorDescription,
         });
-         setError(new Error('Failed to fetch PubChem data.'));
-         setIsLoading(false); // Stop loading as we can't proceed
+        setError(new Error('Failed to fetch PubChem data. Check SMILES validity.'));
+        setIsLoading(false); // Stop loading as we can't proceed
         return;
       }
 
@@ -125,10 +139,12 @@ export function AnalysisForm() {
        // Clear potentially partial results on error
        setAnalysisResult(null);
        // Keep PubChem details if fetched successfully before the main analysis error
+       // If isFetchingPubChem is true here, it means the error happened during the fetch itself.
        if (isFetchingPubChem) setPubChemDetails(null);
     } finally {
       setIsLoading(false);
-      setIsFetchingPubChem(false); // Ensure this is reset
+      // Ensure this is reset regardless of success or failure after the fetch attempt
+      setIsFetchingPubChem(false);
     }
   }
 
@@ -142,7 +158,7 @@ export function AnalysisForm() {
               Analyze Drug Candidate
             </CardTitle>
             <CardDescription>
-              Enter a SMILES string, optional target protein, and your analysis query.
+              Enter a SMILES string (e.g., c1ccccc1), optional target protein, and your analysis query.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -222,12 +238,15 @@ export function AnalysisForm() {
         </Card>
 
         {/* PubChem Details Card */}
-        <PubChemDetailsCard molecule={pubChemDetails} isLoading={isFetchingPubChem} />
+        <PubChemDetailsCard molecule={pubChemDetails} isLoading={isFetchingPubChem && !pubChemDetails} /> {/* Show skeleton only if fetching and no data yet */}
+
 
         {/* Molecular Visualization (Dynamically Imported) */}
         <MolecularVisualization
           smiles={pubChemDetails?.canonicalSmiles}
-          isLoading={isFetchingPubChem}
+          // Show loading skeleton for visualization only when PubChem is being fetched *and* we don't have details yet.
+          // Once details are fetched (or fail), this loading state should resolve.
+          isLoading={isFetchingPubChem && !pubChemDetails}
         />
       </div>
 

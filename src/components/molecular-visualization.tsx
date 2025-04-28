@@ -10,7 +10,7 @@ import { View } from 'lucide-react'; // Using a generic view icon
 
 interface MolecularVisualizationProps {
   smiles: string | null | undefined; // Accept canonical SMILES
-  isLoading: boolean; // Prop to indicate if related data is loading
+  isLoading: boolean; // Prop to indicate if related data (PubChem) is loading AND no smiles data is yet available
 }
 
 // Molecule Icon SVG
@@ -43,13 +43,17 @@ export function MolecularVisualization({ smiles, isLoading }: MolecularVisualiza
     // If we have a SMILES string, create a new viewer
     if (smiles) {
       try {
-        const config = { backgroundColor: 'white' };
-        const viewer = $3Dmol.createViewer(viewerRef.current, config);
-        viewer.addModel(smiles, 'smiles');
-        viewer.setStyle({}, { stick: {} });
-        viewer.zoomTo();
-        viewer.render();
-        glviewer.current = viewer; // Store the instance
+        // Add a small delay to ensure the container is ready after potential skeleton removal
+        setTimeout(() => {
+          if (!viewerRef.current) return; // Check again in case component unmounted quickly
+          const config = { backgroundColor: 'white' };
+          const viewer = $3Dmol.createViewer(viewerRef.current, config);
+          viewer.addModel(smiles, 'smiles');
+          viewer.setStyle({}, { stick: {} });
+          viewer.zoomTo();
+          viewer.render();
+          glviewer.current = viewer; // Store the instance
+        }, 50); // 50ms delay, adjust if needed
       } catch (error) {
         console.error('Error creating 3Dmol viewer:', error);
         // Optionally, display an error message in the container
@@ -77,13 +81,24 @@ export function MolecularVisualization({ smiles, isLoading }: MolecularVisualiza
 
 
   const renderContent = () => {
+    // Show skeleton only when isLoading is true (meaning PubChem is fetching AND we don't have smiles yet).
     if (isLoading) {
       return <Skeleton className="h-64 w-full" />;
     }
 
-    // The div for the viewer. It will be empty initially or if no SMILES is provided.
-    // The placeholder message is handled separately.
-    const viewerDiv = (
+    // If not loading and no SMILES string is available, show placeholder.
+    if (!smiles) {
+       return (
+         <div className="flex flex-col items-center justify-center h-64 text-muted-foreground bg-muted/20 rounded">
+           <View className="h-12 w-12 mb-4" />
+           <p className="text-center">Enter a valid SMILES string above to visualize the molecule.</p>
+         </div>
+       );
+    }
+
+    // If not loading and we have a SMILES string, render the viewer container div.
+    // The useEffect hook will populate this div.
+    return (
       <div
         ref={viewerRef}
         className="h-64 w-full relative bg-white rounded" // Added bg-white for consistency
@@ -92,18 +107,6 @@ export function MolecularVisualization({ smiles, isLoading }: MolecularVisualiza
         {/* 3Dmol viewer will be rendered here by useEffect */}
       </div>
     );
-
-    if (!smiles && !isLoading) {
-      return (
-        <div className="flex flex-col items-center justify-center h-64 text-muted-foreground bg-muted/20 rounded">
-          <View className="h-12 w-12 mb-4" />
-          <p className="text-center">Enter a SMILES string to visualize the molecule.</p>
-        </div>
-      );
-    }
-
-    // Render the viewer div (which might be empty or show an error)
-    return viewerDiv;
   };
 
 
