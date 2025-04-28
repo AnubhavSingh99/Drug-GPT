@@ -2,6 +2,8 @@
 
 import type { AnalyzeDrugCandidateInput, AnalyzeDrugCandidateOutput } from '@/ai/flows/analyze-drug-candidate';
 import { analyzeDrugCandidate } from '@/ai/flows/analyze-drug-candidate';
+import type { Molecule } from '@/services/pubchem'; // Import Molecule type
+import { getMoleculeBySmiles } from '@/services/pubchem'; // Import PubChem service
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -13,12 +15,13 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ResultsDisplay } from '@/components/results-display';
 import { VisualizationPlaceholder } from '@/components/visualization-placeholder';
-import { Loader2, TestTubeDiagonal, Target } from 'lucide-react'; // Added Target icon
+import { PubChemDetailsCard } from '@/components/pubchem-details-card'; // Import new component
+import { Loader2, TestTubeDiagonal, Target } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 
 const formSchema = z.object({
   smiles: z.string().min(1, 'SMILES string is required.'),
-  targetProtein: z.string().optional(), // Added targetProtein field
+  targetProtein: z.string().optional(),
   query: z.string().min(5, 'Please provide an analysis query (at least 5 characters).'),
 });
 
@@ -26,52 +29,87 @@ type FormData = z.infer<typeof formSchema>;
 
 export function AnalysisForm() {
   const [analysisResult, setAnalysisResult] = useState<AnalyzeDrugCandidateOutput | null>(null);
+  const [pubChemDetails, setPubChemDetails] = useState<Molecule | null>(null); // State for PubChem details
   const [isLoading, setIsLoading] = useState(false);
+  const [isFetchingPubChem, setIsFetchingPubChem] = useState(false); // Separate loading state for PubChem
   const [error, setError] = useState<Error | null>(null);
-   const { toast } = useToast();
+  const { toast } = useToast();
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       smiles: '',
-      targetProtein: '', // Default value for targetProtein
+      targetProtein: '',
       query: '',
     },
   });
 
   async function onSubmit(values: FormData) {
     setIsLoading(true);
+    setIsFetchingPubChem(true);
     setError(null);
-    setAnalysisResult(null); // Clear previous results
+    setAnalysisResult(null);
+    setPubChemDetails(null); // Clear previous PubChem details
 
+    let moleculeData: Molecule | null = null;
     try {
+      // 1. Fetch PubChem data first
+      moleculeData = await getMoleculeBySmiles(values.smiles);
+      setIsFetchingPubChem(false);
+
+      if (!moleculeData) {
+        toast({
+          variant: "destructive",
+          title: "PubChem Error",
+          description: `Could not retrieve molecule details for SMILES: ${values.smiles}. Please check the SMILES string.`,
+        });
+         setError(new Error('Failed to fetch PubChem data.'));
+         setIsLoading(false); // Stop loading as we can't proceed
+        return;
+      }
+
+      // Update PubChem details state
+      setPubChemDetails(moleculeData);
+      toast({
+         title: "PubChem Data Fetched",
+         description: `Successfully retrieved details for CID ${moleculeData.cid}.`,
+      });
+
+
+      // 2. Run the main analysis flow
       const input: AnalyzeDrugCandidateInput = {
-        smiles: values.smiles,
-        targetProtein: values.targetProtein, // Pass targetProtein to the flow
+        smiles: values.smiles, // Use the original SMILES submitted by the user
+        targetProtein: values.targetProtein,
         query: values.query,
       };
       const result = await analyzeDrugCandidate(input);
       setAnalysisResult(result);
-       toast({
+      toast({
         title: "Analysis Complete",
         description: "Drug candidate analysis finished successfully.",
       });
     } catch (err: any) {
       console.error('Analysis error:', err);
-      setError(err instanceof Error ? err : new Error('An unexpected error occurred.'));
-       toast({
+      const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred during analysis.';
+      setError(err instanceof Error ? err : new Error(errorMessage));
+      toast({
         variant: "destructive",
         title: "Analysis Failed",
-        description: err.message || "Could not complete the analysis.",
+        description: errorMessage,
       });
+       // Clear potentially partial results on error
+       setAnalysisResult(null);
+       // Keep PubChem details if fetched successfully before the main analysis error
+       if (isFetchingPubChem) setPubChemDetails(null);
     } finally {
       setIsLoading(false);
+      setIsFetchingPubChem(false); // Ensure this is reset
     }
   }
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-      <div>
+      <div className="space-y-8"> {/* Wrap left column content */}
         <Card className="shadow-md">
           <CardHeader>
             <CardTitle className="text-xl flex items-center">
@@ -138,8 +176,13 @@ export function AnalysisForm() {
                     </FormItem>
                   )}
                 />
-                <Button type="submit" disabled={isLoading} className="w-full">
-                  {isLoading ? (
+                <Button type="submit" disabled={isLoading || isFetchingPubChem} className="w-full">
+                  {isFetchingPubChem ? (
+                     <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Fetching PubChem Data...
+                    </>
+                  ) : isLoading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Analyzing...
@@ -153,12 +196,19 @@ export function AnalysisForm() {
           </CardContent>
         </Card>
 
+        {/* PubChem Details Card */}
+        <PubChemDetailsCard molecule={pubChemDetails} isLoading={isFetchingPubChem} />
+
         {/* Placeholder for Visualization */}
         <VisualizationPlaceholder />
       </div>
 
        {/* Results Display Area */}
-        <ResultsDisplay results={analysisResult} error={error} isLoading={isLoading} />
+       {/* Keep results display separate */}
+       <div className="space-y-8">
+         <ResultsDisplay results={analysisResult} error={error} isLoading={isLoading && !isFetchingPubChem} />
+       </div>
+
 
     </div>
   );
