@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * Represents a drug entry potentially from DrugBank or a similar source.
  */
@@ -23,6 +25,16 @@ export interface Drug {
    */
   averageMolecularWeight?: number;
 }
+
+// Export Zod schema for Drug interface
+export const DrugSchema = z.object({
+  drugbankId: z.string().describe('The DrugBank ID.'),
+  name: z.string().describe('The generic name of the drug.'),
+  description: z.string().optional().describe('A brief description or indication of the drug\'s use.'),
+  molecularFormula: z.string().optional().describe('The molecular formula.'),
+  averageMolecularWeight: z.number().optional().describe('The average molecular weight.'),
+});
+
 
 // NOTE: Direct access to the official DrugBank API often requires licensing and authentication.
 // This implementation uses a placeholder/mock logic.
@@ -65,7 +77,15 @@ const MOCK_DRUG_DATABASE: { [key: string]: Drug } = {
     description: 'A common analgesic and antipyretic drug used to treat pain and fever.',
     molecularFormula: 'C8H9NO2',
     averageMolecularWeight: 151.163
-  }
+  },
+   // Adding Chlorcyclizine example from DeepPurpose for potential DrugBank lookup
+   'chlorcyclizine': {
+    drugbankId: 'DB00491', // Example DrugBank ID
+    name: 'Chlorcyclizine',
+    description: 'An antihistamine of the piperazine class used to treat symptoms of allergy such as hay fever and urticaria.',
+    molecularFormula: 'C18H21ClN2',
+    averageMolecularWeight: 300.829
+  },
 };
 
 
@@ -80,21 +100,24 @@ export async function getDrugByName(drugName: string): Promise<Drug | null> {
   // Simulate API call delay
   await new Promise(resolve => setTimeout(resolve, 50)); // 50ms delay
 
-  const lowerCaseDrugName = drugName.toLowerCase();
+  // Attempt to find a match, considering potential variations in naming (e.g., IUPAC vs common name)
+  const lowerCaseDrugName = drugName?.toLowerCase().trim();
+  if (!lowerCaseDrugName) return null;
 
-  // In a real implementation, you would make an API call here:
-  // const response = await fetch(`https://api.drugbank.com/v1/drugs?q=${encodeURIComponent(drugName)}`, {
-  //   headers: {
-  //     'Authorization': `Bearer YOUR_API_KEY`,
-  //     'Content-Type': 'application/json'
-  //   }
-  // });
-  // if (!response.ok) { /* Handle error */ return null; }
-  // const data = await response.json();
-  // // Process data and return the relevant drug information
+  // Direct lookup by key
+  let drug = MOCK_DRUG_DATABASE[lowerCaseDrugName];
 
-  // Placeholder logic:
-  const drug = MOCK_DRUG_DATABASE[lowerCaseDrugName];
+  // If direct lookup fails, try searching by name field (more robust for variations)
+   if (!drug) {
+     for (const key in MOCK_DRUG_DATABASE) {
+       const entry = MOCK_DRUG_DATABASE[key];
+       if (entry.name.toLowerCase() === lowerCaseDrugName) {
+         drug = entry;
+         break;
+       }
+       // Add more sophisticated matching if needed (e.g., contains, startsWith)
+     }
+   }
 
   if (drug) {
     console.log(`Found drug in mock database: ${drug.name}`);

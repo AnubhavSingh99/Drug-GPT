@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * @fileOverview Service for interacting with a hypothetical DeepPurpose analysis tool.
  */
@@ -16,6 +18,13 @@ export interface DeepPurposeResult {
   confidence?: number;
 }
 
+// Export Zod schema for DeepPurposeResult interface
+export const DeepPurposeResultSchema = z.object({
+   predictedPurpose: z.string().describe('The predicted purpose or mechanism of action analysis.'),
+   confidence: z.number().optional().describe('Confidence score (0-1) for the prediction, if available.'),
+});
+
+
 // NOTE: This is a placeholder/mock implementation for a hypothetical "DeepPurpose" service.
 // In a real-world scenario, you would replace this with actual API calls
 // to the DeepPurpose service, potentially requiring authentication.
@@ -30,13 +39,17 @@ const MOCK_DEEPPURPOSE_RESULTS: { [key: string]: DeepPurposeResult } = {
     predictedPurpose: 'Predicted as an anti-inflammatory agent, likely targeting COX enzymes. Potential analgesic and antipyretic properties.',
     confidence: 0.85
   },
-  'CN1CCN(CC1)C(C1=CC=CC=C1)C1=CC=C(Cl)C=C1': { // Chlorcyclizine (Example)
+  'CN1CCN(CC1)C(C1=CC=CC=C1)C1=CC=C(Cl)C=C1': { // Chlorcyclizine (Example canonical SMILES might differ slightly in reality)
     predictedPurpose: 'Predicted as a potential H1 histamine receptor antagonist (antihistamine). May possess anticholinergic properties.',
     confidence: 0.78
   },
    'CCN(CC)CCCC(C)NC1=C2C=CC(=CC2=NC=C1)Cl': { // Chloroquine (Example)
      predictedPurpose: 'Predicted as an antimalarial agent, potentially interfering with heme detoxification in Plasmodium parasites. May also exhibit anti-inflammatory and antiviral properties.',
      confidence: 0.88
+  },
+  'C1=CC=C(C=C1)C(=O)N2C=NC3=C2C(=O)N(C(=O)N3C)C': { // Caffeine canonical SMILES (example)
+     predictedPurpose: 'Predicted as a central nervous system stimulant, likely acting as an adenosine receptor antagonist. May improve alertness and reduce fatigue.',
+     confidence: 0.90
   }
   // Add more mock results as needed
 };
@@ -63,14 +76,14 @@ export async function getDeepPurposeAnalysis(smiles: string): Promise<DeepPurpos
   } else {
     // Simulate a case where the service might return a generic prediction
     // even if not in the explicit mock data, based on some hypothetical model.
-     if (smiles.length > 10) { // Arbitrary condition for demo
+     if (smiles && smiles.length > 10 && smiles.includes('N')) { // Arbitrary condition for demo
         console.log(`Generating generic DeepPurpose prediction for ${smiles}`);
         return {
-             predictedPurpose: 'Generic prediction: Potential biological activity detected based on structural features. Further investigation recommended.',
+             predictedPurpose: 'Generic prediction: Potential biological activity detected based on structural features (e.g., presence of Nitrogen). Further investigation recommended.',
              confidence: 0.5
         };
      }
-    console.warn(`DeepPurpose prediction not found for SMILES: ${smiles}`);
+    console.warn(`DeepPurpose prediction not found or generated for SMILES: ${smiles}`);
     return null;
   }
 }

@@ -15,24 +15,25 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ResultsDisplay } from '@/components/results-display';
-import { PubChemDetailsCard } from '@/components/pubchem-details-card'; // Import new component
+import { PubChemDetailsCard } from '@/components/pubchem-details-card';
+import { DeepPurposeDetailsCard } from '@/components/deeppurpose-details-card'; // New component
+import { DrugBankDetailsCard } from '@/components/drugbank-details-card'; // New component
 import { Loader2, TestTubeDiagonal, Target } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import dynamic from 'next/dynamic';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs" // Import Tabs components
+
 
 // Dynamically import MolecularVisualization with SSR disabled
 const MolecularVisualization = dynamic(
   () => import('@/components/molecular-visualization').then((mod) => mod.MolecularVisualization),
   {
     ssr: false,
-    loading: () => ( // Optional: Show a skeleton loader while the component loads
+    loading: () => (
       <Card className="shadow-md">
         <CardHeader>
-          <CardTitle className="text-xl flex items-center">
-             {/* Placeholder Icon or Text */}
-             Loading Visualization...
-          </CardTitle>
+          <CardTitle className="text-xl">Loading Visualization...</CardTitle>
         </CardHeader>
         <CardContent>
           <Skeleton className="h-64 w-full" />
@@ -52,21 +53,18 @@ const formSchema = z.object({
 type FormData = z.infer<typeof formSchema>;
 
 // Simple regex to guess if a string might be a formula instead of SMILES
-// Looks for patterns like C#H#, or letters directly followed by numbers > 1
-// This is NOT a perfect SMILES validator, just a heuristic.
 const seemsLikeFormula = (input: string): boolean => {
-   // Check for common formula patterns (e.g., C6H12O6, CH3COOH)
-   // Allows single digits after letters, but flags multiple digits or letters following numbers.
-   if (/\s/.test(input)) return false; // SMILES usually don't have spaces
+   if (/\s/.test(input)) return false;
    return /([A-Za-z][2-9])|([A-Za-z]\d{2,})|(\d[A-Za-z])/.test(input);
 };
 
 export function AnalysisForm() {
+  // Separate states for different data pieces
   const [analysisResult, setAnalysisResult] = useState<AnalyzeDrugCandidateOutput | null>(null);
-  const [pubChemDetails, setPubChemDetails] = useState<Molecule | null>(null); // State for PubChem details
-  const [isLoading, setIsLoading] = useState(false);
-  const [isFetchingPubChem, setIsFetchingPubChem] = useState(false); // Separate loading state for PubChem
+  const [pubChemDetails, setPubChemDetails] = useState<Molecule | null>(null);
+  const [isLoading, setIsLoading] = useState(false); // Combined loading state
   const [error, setError] = useState<Error | null>(null);
+  const [activeTab, setActiveTab] = useState("analysis"); // Default tab
   const { toast } = useToast();
 
   const form = useForm<FormData>({
@@ -80,16 +78,14 @@ export function AnalysisForm() {
 
   async function onSubmit(values: FormData) {
     setIsLoading(true);
-    setIsFetchingPubChem(true);
     setError(null);
     setAnalysisResult(null);
-    setPubChemDetails(null); // Clear previous PubChem details
+    setPubChemDetails(null);
+    setActiveTab("pubchem"); // Switch to PubChem tab initially
 
-    let moleculeData: Molecule | null = null;
     try {
-      // 1. Fetch PubChem data first
-      moleculeData = await getMoleculeBySmiles(values.smiles);
-      setIsFetchingPubChem(false);
+      // 1. Fetch PubChem data first (essential)
+      const moleculeData = await getMoleculeBySmiles(values.smiles);
 
       if (!moleculeData) {
         const inputIsLikelyFormula = seemsLikeFormula(values.smiles);
@@ -103,21 +99,21 @@ export function AnalysisForm() {
           description: errorDescription,
         });
         setError(new Error('Failed to fetch PubChem data. Check SMILES validity.'));
-        setIsLoading(false); // Stop loading as we can't proceed
+        setIsLoading(false);
         return;
       }
 
-      // Update PubChem details state
       setPubChemDetails(moleculeData);
       toast({
          title: "PubChem Data Fetched",
-         description: `Successfully retrieved details for CID ${moleculeData.cid}.`,
+         description: `Successfully retrieved details for CID ${moleculeData.cid}. Now running analysis...`,
       });
+       setActiveTab("analysis"); // Switch to analysis tab after PubChem success
 
 
       // 2. Run the main analysis flow
       const input: AnalyzeDrugCandidateInput = {
-        smiles: moleculeData.canonicalSmiles, // Use canonical SMILES from PubChem for analysis consistency
+        smiles: moleculeData.canonicalSmiles, // Use canonical SMILES
         targetProtein: values.targetProtein,
         query: values.query,
       };
@@ -127,6 +123,7 @@ export function AnalysisForm() {
         title: "Analysis Complete",
         description: "Drug candidate analysis finished successfully.",
       });
+
     } catch (err: any) {
       console.error('Analysis error:', err);
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred during analysis.';
@@ -136,21 +133,21 @@ export function AnalysisForm() {
         title: "Analysis Failed",
         description: errorMessage,
       });
-       // Clear potentially partial results on error
+       // Clear AI results on error, but keep PubChem data if it was fetched
        setAnalysisResult(null);
-       // Keep PubChem details if fetched successfully before the main analysis error
-       // If isFetchingPubChem is true here, it means the error happened during the fetch itself.
-       if (isFetchingPubChem) setPubChemDetails(null);
+       // setActiveTab("error"); // Or keep the current tab, maybe pubchem?
+       if (!pubChemDetails) setActiveTab("pubchem"); // Go back to pubchem if it failed there
+       else setActiveTab("analysis"); // Otherwise show the analysis tab with the error
+
     } finally {
       setIsLoading(false);
-      // Ensure this is reset regardless of success or failure after the fetch attempt
-      setIsFetchingPubChem(false);
     }
   }
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-      <div className="space-y-8"> {/* Wrap left column content */}
+      {/* Left Column: Input Form and Visualization */}
+      <div className="space-y-8">
         <Card className="shadow-md">
           <CardHeader>
             <CardTitle className="text-xl flex items-center">
@@ -158,7 +155,7 @@ export function AnalysisForm() {
               Analyze Drug Candidate
             </CardTitle>
             <CardDescription>
-              Enter a SMILES string (e.g., c1ccccc1), optional target protein, and your analysis query.
+              Enter a SMILES string, optional target protein, and your analysis query.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -175,6 +172,7 @@ export function AnalysisForm() {
                          placeholder="e.g., c1ccccc1 (Benzene)" {...field}
                          className="font-mono"
                          aria-label="SMILES String Input"
+                         disabled={isLoading} // Disable input while loading
                          />
                       </FormControl>
                       <FormMessage />
@@ -193,6 +191,7 @@ export function AnalysisForm() {
                         <Input
                          placeholder="e.g., ACE2, EGFR" {...field}
                          aria-label="Target Protein Input"
+                          disabled={isLoading} // Disable input while loading
                          />
                       </FormControl>
                       <FormMessage />
@@ -211,22 +210,18 @@ export function AnalysisForm() {
                           rows={4}
                           {...field}
                            aria-label="Analysis Query Input"
+                           disabled={isLoading} // Disable input while loading
                         />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-                <Button type="submit" disabled={isLoading || isFetchingPubChem} className="w-full">
-                  {isFetchingPubChem ? (
+                <Button type="submit" disabled={isLoading} className="w-full">
+                  {isLoading ? (
                      <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Fetching PubChem Data...
-                    </>
-                  ) : isLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Analyzing...
+                      {pubChemDetails ? 'Analyzing...' : 'Fetching PubChem Data...'}
                     </>
                   ) : (
                     'Run Analysis'
@@ -237,26 +232,96 @@ export function AnalysisForm() {
           </CardContent>
         </Card>
 
-        {/* PubChem Details Card */}
-        <PubChemDetailsCard molecule={pubChemDetails} isLoading={isFetchingPubChem && !pubChemDetails} /> {/* Show skeleton only if fetching and no data yet */}
-
-
-        {/* Molecular Visualization (Dynamically Imported) */}
-        <MolecularVisualization
+         {/* Molecular Visualization */}
+         <MolecularVisualization
           smiles={pubChemDetails?.canonicalSmiles}
-          // Show loading skeleton for visualization only when PubChem is being fetched *and* we don't have details yet.
-          // Once details are fetched (or fail), this loading state should resolve.
-          isLoading={isFetchingPubChem && !pubChemDetails}
+          isLoading={isLoading && !pubChemDetails} // Loading only when fetching pubchem
         />
       </div>
 
-       {/* Results Display Area */}
-       {/* Keep results display separate */}
-       <div className="space-y-8">
-         <ResultsDisplay results={analysisResult} error={error} isLoading={isLoading && !isFetchingPubChem} />
-       </div>
+      {/* Right Column: Results Tabs */}
+      <div className="space-y-8">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="pubchem" disabled={!pubChemDetails && !isLoading}>PubChem</TabsTrigger>
+            <TabsTrigger value="drugbank" disabled={!analysisResult?.drugBankData && !isLoading}>DrugBank</TabsTrigger>
+            <TabsTrigger value="deeppurpose" disabled={!analysisResult?.deepPurposeData && !isLoading}>DeepPurpose</TabsTrigger>
+            <TabsTrigger value="analysis" disabled={!analysisResult?.synthesizedAnalysis && !isLoading && !error}>Analysis</TabsTrigger>
+          </TabsList>
 
+          {/* PubChem Tab Content */}
+          <TabsContent value="pubchem">
+             <PubChemDetailsCard molecule={pubChemDetails} isLoading={isLoading && !pubChemDetails} />
+             {/* Placeholder or message if no data yet */}
+             {!pubChemDetails && !isLoading && (
+                <Card className="shadow-md mt-4 border-dashed">
+                    <CardContent className="pt-6 text-center text-muted-foreground">
+                        PubChem details will appear here after fetching.
+                    </CardContent>
+                </Card>
+             )}
+          </TabsContent>
 
+          {/* DrugBank Tab Content */}
+           <TabsContent value="drugbank">
+             <DrugBankDetailsCard drug={analysisResult?.drugBankData} isLoading={isLoading && !analysisResult} />
+              {/* Message if analysis ran but no DrugBank data was found/returned */}
+             {!isLoading && analysisResult && !analysisResult.drugBankData && (
+                 <Card className="shadow-md mt-4 border-dashed">
+                    <CardContent className="pt-6 text-center text-muted-foreground">
+                        No specific DrugBank information was found or relevant for this analysis.
+                    </CardContent>
+                </Card>
+             )}
+              {/* Placeholder before analysis runs */}
+               {!isLoading && !analysisResult && !error && (
+                 <Card className="shadow-md mt-4 border-dashed">
+                    <CardContent className="pt-6 text-center text-muted-foreground">
+                       DrugBank details will appear here if relevant to the analysis.
+                    </CardContent>
+                </Card>
+             )}
+          </TabsContent>
+
+          {/* DeepPurpose Tab Content */}
+           <TabsContent value="deeppurpose">
+             <DeepPurposeDetailsCard result={analysisResult?.deepPurposeData} isLoading={isLoading && !analysisResult} />
+              {/* Message if analysis ran but no DeepPurpose data was found/returned */}
+              {!isLoading && analysisResult && !analysisResult.deepPurposeData && (
+                 <Card className="shadow-md mt-4 border-dashed">
+                    <CardContent className="pt-6 text-center text-muted-foreground">
+                       No DeepPurpose prediction was generated or relevant for this analysis.
+                    </CardContent>
+                </Card>
+             )}
+              {/* Placeholder before analysis runs */}
+               {!isLoading && !analysisResult && !error && (
+                 <Card className="shadow-md mt-4 border-dashed">
+                    <CardContent className="pt-6 text-center text-muted-foreground">
+                       DeepPurpose prediction details will appear here if relevant to the analysis.
+                    </CardContent>
+                </Card>
+             )}
+          </TabsContent>
+
+          {/* Analysis Tab Content */}
+          <TabsContent value="analysis">
+             <ResultsDisplay
+                results={analysisResult ? { analysis: analysisResult.synthesizedAnalysis } : null} // Pass only synthesis here
+                error={error} // Pass the main error state
+                isLoading={isLoading && pubChemDetails != null} // Loading is true only *after* pubchem fetch succeeds
+                />
+                {/* Placeholder before analysis runs */}
+               {!isLoading && !analysisResult && !error && (
+                 <Card className="shadow-md mt-4 border-dashed">
+                    <CardContent className="pt-6 text-center text-muted-foreground">
+                       Synthesized analysis results will appear here.
+                    </CardContent>
+                </Card>
+             )}
+          </TabsContent>
+        </Tabs>
+      </div>
     </div>
   );
 }

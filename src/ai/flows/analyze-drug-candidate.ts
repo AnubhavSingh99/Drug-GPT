@@ -8,12 +8,13 @@
  * - AnalyzeDrugCandidateOutput - The return type for the analyzeDrugCandidate function.
  */
 
-import {ai} from '@/ai/ai-instance';
-import {z} from 'genkit';
-import {getMoleculeBySmiles} from '@/services/pubchem';
-import {getDrugByName} from '@/services/drugbank';
-import { getDeepPurposeAnalysis } from '@/services/deeppurpose'; // Import the new service
+import { ai } from '@/ai/ai-instance';
+import { z } from 'genkit';
+import { getMoleculeBySmiles, type Molecule } from '@/services/pubchem';
+import { getDrugByName, type Drug, DrugSchema } from '@/services/drugbank'; // Import Drug type and schema
+import { getDeepPurposeAnalysis, type DeepPurposeResult, DeepPurposeResultSchema } from '@/services/deeppurpose'; // Import DeepPurpose types and schema
 
+// Define input schema (remains the same)
 const AnalyzeDrugCandidateInputSchema = z.object({
   smiles: z
     .string()
@@ -26,15 +27,19 @@ const AnalyzeDrugCandidateInputSchema = z.object({
 });
 export type AnalyzeDrugCandidateInput = z.infer<typeof AnalyzeDrugCandidateInputSchema>;
 
+
+// Define the structured output schema
 const AnalyzeDrugCandidateOutputSchema = z.object({
-  analysis: z.string().describe('The analysis of the drug candidate.'),
+  synthesizedAnalysis: z.string().describe('The overall synthesized analysis addressing the user query, incorporating information from all relevant tools used.'),
+  drugBankData: z.nullable(DrugSchema).describe('Information retrieved from DrugBank, if applicable.'),
+  deepPurposeData: z.nullable(DeepPurposeResultSchema).describe('Prediction results from the DeepPurpose analysis.'),
+  // We fetch PubChem data separately in the component now, so no need to return it from the flow.
+  // pubChemData: z.nullable(PubChemSchema).describe('Information retrieved from PubChem.'),
 });
 export type AnalyzeDrugCandidateOutput = z.infer<typeof AnalyzeDrugCandidateOutputSchema>;
 
-export async function analyzeDrugCandidate(input: AnalyzeDrugCandidateInput): Promise<AnalyzeDrugCandidateOutput> {
-  return analyzeDrugCandidateFlow(input);
-}
 
+// Define tools (remain the same)
 const pubChemTool = ai.defineTool({
   name: 'getMoleculeBySmiles',
   description: 'Retrieves basic molecule information (CID, formula, IUPAC name, canonical SMILES, molecular weight) from PubChem based on a SMILES string. Should be the first step for chemical data gathering.',
@@ -51,15 +56,8 @@ const pubChemTool = ai.defineTool({
 },
 async input => {
   const molecule = await getMoleculeBySmiles(input.smiles);
-  // Let the LLM handle the case where the tool returns null, rather than throwing here.
-  // It can inform the user that PubChem data wasn't found.
   return molecule;
-  // if (!molecule) {
-  //   throw new Error(`Molecule with SMILES ${input.smiles} not found in PubChem.`);
-  // }
-  // return molecule;
-}
-);
+});
 
 const drugBankTool = ai.defineTool({
   name: 'getDrugByName',
@@ -67,57 +65,44 @@ const drugBankTool = ai.defineTool({
   inputSchema: z.object({
     drugName: z.string().describe('The name of the drug to search for in DrugBank.'),
   }),
-  outputSchema: z.object({
-    drugbankId: z.string().describe('The DrugBank ID.'),
-    name: z.string().describe('The generic name of the drug.'),
-    description: z.string().optional().describe('A brief description or indication of the drug\'s use.'),
-    molecularFormula: z.string().optional().describe('The molecular formula.'),
-    averageMolecularWeight: z.number().optional().describe('The average molecular weight.'),
-  }),
+  outputSchema: DrugSchema, // Use the exported schema
 },
 async input => {
   const drug = await getDrugByName(input.drugName);
-   // Let the LLM handle the null case.
   return drug;
-  // if (!drug) {
-  //   throw new Error(`Drug with name ${input.drugName} not found in DrugBank.`);
-  // }
-  // return drug;
-}
-);
+});
 
-// Define the DeepPurpose tool
 const deepPurposeTool = ai.defineTool({
   name: 'getDeepPurposeAnalysis',
   description: 'Predicts the potential purpose or mechanism of action for a given molecule based on its SMILES string using an AI model (DeepPurpose). Use this after obtaining basic molecule info from PubChem to gain deeper insights into its function, especially if the query asks about potential use, mechanism, or targets.',
   inputSchema: z.object({
     smiles: z.string().describe('The SMILES string of the molecule to analyze with DeepPurpose.'),
   }),
-  outputSchema: z.object({
-     predictedPurpose: z.string().describe('The predicted purpose or mechanism of action analysis.'),
-     confidence: z.number().optional().describe('Confidence score (0-1) for the prediction, if available.'),
-  }),
+  outputSchema: DeepPurposeResultSchema, // Use the exported schema
 },
 async input => {
   const analysis = await getDeepPurposeAnalysis(input.smiles);
-  // Let the LLM handle the null case.
   return analysis;
 });
 
 
-const prompt = ai.definePrompt({
-  name: 'analyzeDrugCandidatePrompt',
-  tools: [pubChemTool, drugBankTool, deepPurposeTool], // Added deepPurposeTool
+// Define the prompt - focus on generating the synthesized analysis text
+const analysisPrompt = ai.definePrompt({
+  name: 'analysisPrompt',
+  tools: [pubChemTool, drugBankTool, deepPurposeTool],
   input: {
     schema: z.object({
       smiles: z.string().describe('The SMILES string of the drug candidate.'),
       targetProtein: z.string().optional().describe('The optional target protein for the analysis.'),
       query: z.string().describe('The analysis query from the user.'),
+      // Include optional context from tool calls if needed, though flow can manage this
+      pubChemName: z.string().optional().describe('IUPAC name from PubChem if found.'),
     }),
   },
   output: {
+    // The prompt output focuses *only* on the synthesized text analysis
     schema: z.object({
-      analysis: z.string().describe('The comprehensive analysis of the drug candidate, incorporating information from all relevant tools used.'),
+      synthesizedAnalysis: z.string().describe('The comprehensive textual analysis of the drug candidate, synthesizing information from relevant tools used and addressing the user query.'),
     }),
   },
   prompt: `You are an expert pharmaceutical researcher specializing in early-stage drug discovery analysis.
@@ -128,20 +113,19 @@ const prompt = ai.definePrompt({
   User Query: {{{query}}}
 
   Instructions:
-  1.  **Gather Basic Data:** First, *always* use the 'getMoleculeBySmiles' tool with the provided SMILES string ({{{smiles}}}) to retrieve fundamental chemical properties (molecular weight, formula, IUPAC name, canonical SMILES). This information is crucial for any further analysis.
-      *   If the 'getMoleculeBySmiles' tool returns null or fails, state clearly that essential chemical information could not be retrieved from PubChem for the given SMILES string and that the analysis is severely limited or cannot proceed. Do not attempt to use other tools that rely on this basic data if it's missing.
-  2.  **Check Known Drugs (Conditional):** If 'getMoleculeBySmiles' was successful and returned an IUPAC name, consider using the 'getDrugByName' tool with that name (or significant parts of it) to check if the molecule corresponds to a known drug in DrugBank. Also, use 'getDrugByName' if the user's query explicitly mentions a known drug name. Integrate any relevant findings (like description or known uses) into your analysis. If the tool returns null, mention that the compound doesn't appear to be a registered drug under that name in the available data.
-  3.  **Predict Purpose (Conditional):** After successfully retrieving data with 'getMoleculeBySmiles', use the 'getDeepPurposeAnalysis' tool with the *original* SMILES string ({{{smiles}}}) to predict its potential purpose or mechanism of action. This provides deeper functional insight. Integrate this prediction (and confidence score, if available) into your analysis. If the tool returns null, mention that a purpose prediction could not be obtained.
-  4.  **Address User Query:** Directly address the user's specific query: "{{{query}}}", synthesizing information from all the tools used.
-  5.  **Target Protein Analysis (Conditional):** If a target protein ({{{targetProtein}}}) was provided, specifically discuss the potential interaction, binding affinity (qualitatively, based on structure, properties, and predicted purpose), or suitability of the candidate for this target. Relate findings from PubChem and DeepPurpose to this specific target. If no target was provided, focus on the general properties, predicted purpose, potential applications, or risks based on the query and tool results.
-  6.  **Synthesize Analysis:** Provide a concise yet informative analysis. Structure your response clearly. Include potential strengths, weaknesses, or areas for further investigation based *only* on the data obtained from the tools. Clearly state which information comes from which tool (e.g., "PubChem indicates...", "DrugBank suggests...", "DeepPurpose predicts...").
-  7.  **Handle Tool Failures Gracefully:** If any tool other than the initial 'getMoleculeBySmiles' call fails or returns null, mention this limitation in the relevant part of your analysis (e.g., "Could not retrieve DrugBank information," "DeepPurpose analysis was inconclusive"). Do not hallucinate information if a tool fails.
+  1.  **Foundation:** You have access to tools: 'getMoleculeBySmiles' (for basic chemical data), 'getDrugByName' (for known drug info), and 'getDeepPurposeAnalysis' (for functional prediction). Assume the essential 'getMoleculeBySmiles' has already been successfully called if an IUPAC name '{{pubChemName}}' is provided; otherwise, you *must* call it first. If it fails, report that limitation clearly.
+  2.  **Tool Strategy:** Based on the user query "{{{query}}}" and the basic chemical data (especially the IUPAC name '{{pubChemName}}', if available), decide *if* you need to use 'getDrugByName' (e.g., if the name looks like a drug or the query asks about known drugs) and *if* you need 'getDeepPurposeAnalysis' (e.g., if the query asks about function, mechanism, or potential use).
+  3.  **Synthesize:** Generate a comprehensive textual analysis that directly answers the user's query: "{{{query}}}".
+      *   Integrate findings from the tools you decided to use. Clearly state the source (e.g., "PubChem indicates...", "DrugBank suggests...", "DeepPurpose predicts...").
+      *   If a target protein ({{{targetProtein}}}) was provided, discuss the candidate's potential relevance to it, drawing connections from the available data (structure, properties, predicted purpose).
+      *   If a tool fails or returns no relevant information, explicitly mention this limitation in your analysis (e.g., "DrugBank information for this name was not found," "DeepPurpose analysis did not yield a specific prediction."). Do not invent data.
+  4.  **Focus:** Your primary output is the single 'synthesizedAnalysis' text block. Do not output raw tool data in this text. The calling function will handle gathering the raw tool outputs separately.
 
-  Return only the final, synthesized analysis as a single string in the 'analysis' field.
+  Return ONLY the final, synthesized analysis text.
 `,
 });
 
-
+// Define the main flow function
 const analyzeDrugCandidateFlow = ai.defineFlow<
   typeof AnalyzeDrugCandidateInputSchema,
   typeof AnalyzeDrugCandidateOutputSchema
@@ -149,20 +133,100 @@ const analyzeDrugCandidateFlow = ai.defineFlow<
   name: 'analyzeDrugCandidateFlow',
   inputSchema: AnalyzeDrugCandidateInputSchema,
   outputSchema: AnalyzeDrugCandidateOutputSchema,
-}, async input => {
-  console.log('Starting analyzeDrugCandidateFlow with input:', input); // Add logging
-  try {
-     const {output} = await prompt(input);
-     console.log('analyzeDrugCandidateFlow received output from prompt:', output); // Add logging
-     if (!output) {
-        console.error('analyzeDrugCandidateFlow: Prompt returned null output.');
-        throw new Error('Analysis failed: No output received from the AI model.');
-     }
-     return output!;
-  } catch (error) {
-      console.error('Error during analyzeDrugCandidateFlow execution:', error); // Add logging
-      // Re-throw the error to be caught by the calling component
-      throw error;
-  }
+}, async (input) => {
+  console.log('Starting analyzeDrugCandidateFlow with input:', input);
 
+  let pubChemData: Molecule | null = null;
+  let drugBankData: Drug | null = null;
+  let deepPurposeData: DeepPurposeResult | null = null;
+  let synthesizedAnalysis = "Analysis could not be completed."; // Default analysis
+
+  try {
+    // Step 1: Always get PubChem data first (critical for context)
+    // Note: We call the *service* directly here, not necessarily the tool via LLM,
+    // because we *always* need this data for the next steps.
+    // The tool is available *if* the LLM needs to re-fetch or verify.
+    pubChemData = await getMoleculeBySmiles(input.smiles);
+
+    if (!pubChemData) {
+      // If PubChem fails, we cannot proceed meaningfully.
+      // The component handles displaying this initial error better.
+      // Here, we'll return a basic failure message in the structure.
+      console.error(`analyzeDrugCandidateFlow: PubChem lookup failed for SMILES: ${input.smiles}. Aborting analysis.`);
+      // Throw an error that the component can catch and display appropriately
+      throw new Error(`Essential chemical data could not be retrieved from PubChem for SMILES: ${input.smiles}. Analysis cannot proceed.`);
+      // return {
+      //   synthesizedAnalysis: `Analysis failed: Essential chemical data could not be retrieved from PubChem for SMILES: ${input.smiles}.`,
+      //   drugBankData: null,
+      //   deepPurposeData: null,
+      // };
+    }
+
+    // Step 2: Run the analysis prompt, providing PubChem name as context
+    // The LLM will use tools as needed based on the prompt instructions.
+    const llmInput = {
+      ...input,
+      smiles: pubChemData.canonicalSmiles, // Use canonical SMILES
+      pubChemName: pubChemData.iupacName,
+    };
+    const { output: llmOutput, history } = await analysisPrompt.withTracking(llmInput);
+
+     if (!llmOutput?.synthesizedAnalysis) {
+        console.error('analyzeDrugCandidateFlow: Analysis prompt returned no synthesized analysis.');
+        throw new Error('Analysis failed: The AI model did not generate an analysis text.');
+     }
+     synthesizedAnalysis = llmOutput.synthesizedAnalysis;
+     console.log('analyzeDrugCandidateFlow: Received synthesized analysis:', synthesizedAnalysis);
+
+    // Step 3: Extract structured data from the LLM's tool calls in history
+    if (history) {
+      for (const event of history) {
+        if (event.type === 'toolRequest' && event.toolRequest.toolResponse?.output) {
+          const toolName = event.toolRequest.name;
+          const toolOutput = event.toolRequest.toolResponse.output;
+
+          if (toolName === 'getDrugByName' && toolOutput) {
+            try {
+              // Validate the output against the schema
+              drugBankData = DrugSchema.parse(toolOutput);
+              console.log('analyzeDrugCandidateFlow: Extracted DrugBank data:', drugBankData);
+            } catch (validationError) {
+              console.warn(`analyzeDrugCandidateFlow: Failed to validate DrugBank tool output:`, validationError);
+              // Keep drugBankData as null if validation fails
+            }
+          } else if (toolName === 'getDeepPurposeAnalysis' && toolOutput) {
+             try {
+                // Validate the output against the schema
+                deepPurposeData = DeepPurposeResultSchema.parse(toolOutput);
+                console.log('analyzeDrugCandidateFlow: Extracted DeepPurpose data:', deepPurposeData);
+             } catch (validationError) {
+               console.warn(`analyzeDrugCandidateFlow: Failed to validate DeepPurpose tool output:`, validationError);
+                // Keep deepPurposeData as null if validation fails
+             }
+          }
+          // We don't need to extract PubChem data here as we fetched it directly earlier.
+        }
+      }
+    } else {
+        console.warn("analyzeDrugCandidateFlow: No history found for tool call extraction.");
+    }
+
+    // Return the combined structured output
+    return {
+      synthesizedAnalysis,
+      drugBankData,
+      deepPurposeData,
+      // pubChemData: pubChemData // We now fetch this in the component
+    };
+
+  } catch (error) {
+    console.error('Error during analyzeDrugCandidateFlow execution:', error);
+    // Re-throw the error to be caught by the calling component
+    throw error;
+  }
 });
+
+// Export the wrapper function
+export async function analyzeDrugCandidate(input: AnalyzeDrugCandidateInput): Promise<AnalyzeDrugCandidateOutput> {
+  return analyzeDrugCandidateFlow(input);
+}

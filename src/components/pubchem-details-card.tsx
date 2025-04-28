@@ -16,7 +16,7 @@ export function PubChemDetailsCard({ molecule, isLoading }: PubChemDetailsCardPr
   // Once loading is false, we either show the data or nothing.
   if (isLoading && !molecule) {
      return (
-      <Card className="shadow-md animate-pulse">
+      <Card className="shadow-md animate-pulse mt-4"> {/* Added mt-4 */}
         <CardHeader>
            <CardTitle className="text-xl flex items-center">
             <BeakerIcon className="mr-2 h-5 w-5 text-muted-foreground" />
@@ -51,13 +51,14 @@ export function PubChemDetailsCard({ molecule, isLoading }: PubChemDetailsCardPr
 
 
   // If loading is finished and still no molecule, render nothing.
+  // The parent TabsContent handles the placeholder message.
   if (!molecule) {
     return null;
   }
 
   // If we have molecule data (isLoading is false or data arrived before loading finished)
   return (
-    <Card className="shadow-md">
+    <Card className="shadow-md mt-4"> {/* Added mt-4 */}
       <CardHeader>
         <CardTitle className="text-xl flex items-center">
           <BeakerIcon className="mr-2 h-5 w-5 text-primary" />
@@ -89,4 +90,3 @@ export function PubChemDetailsCard({ molecule, isLoading }: PubChemDetailsCardPr
     </Card>
   );
 }
-
