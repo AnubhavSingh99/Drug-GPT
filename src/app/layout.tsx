@@ -7,8 +7,8 @@ import { cn } from '@/lib/utils';
 import { Toaster } from "@/components/ui/toaster";
 
 export const metadata: Metadata = {
-  title: 'Molecula - AI Drug Discovery',
-  description: 'AI-Powered SaaS Platform for Drug Discovery',
+  title: 'Drug GPT - AI Drug Discovery',
+  description: 'AI-Powered SaaS Platform for Drug Discovery using GPT',
 };
 
 export default function RootLayout({
