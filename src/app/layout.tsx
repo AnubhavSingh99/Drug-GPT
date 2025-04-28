@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
-import { GeistSans, GeistMono } from 'geist/font';
+import { GeistSans } from 'geist/font/sans';
+import { GeistMono } from 'geist/font/mono';
 import './globals.css';
 import { Header } from '@/components/layout/header';
 import { cn } from '@/lib/utils';
@@ -16,7 +17,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={cn("h-full", GeistSans.variable, GeistMono.variable)}>
+    <html lang="en" className={cn("h-full", GeistSans.variable, GeistMono.variable)} suppressHydrationWarning={true}>
       <body
         className={cn(
           'h-full font-sans antialiased',
@@ -25,6 +26,7 @@ export default function RootLayout({
           // Tailwind's font-sans and font-mono utilities will pick them up
           // based on the CSS variables defined in globals.css
         )}
+        suppressHydrationWarning={true}
       >
         <div className="flex flex-col min-h-screen">
           <Header />
