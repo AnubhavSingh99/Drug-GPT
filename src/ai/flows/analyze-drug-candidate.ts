@@ -56,6 +56,9 @@ const pubChemTool = ai.defineTool({
 },
 async input => {
   const molecule = await getMoleculeBySmiles(input.smiles);
+  if (!molecule) {
+    throw new Error(`PubChem tool failed: Could not retrieve molecule for SMILES: ${input.smiles}`);
+  }
   return molecule;
 });
 
@@ -69,6 +72,17 @@ const drugBankTool = ai.defineTool({
 },
 async input => {
   const drug = await getDrugByName(input.drugName);
+  if (!drug) {
+    // It's okay if the drug is not found, the LLM should handle this.
+    // Returning null or an empty object might be confusing for the LLM.
+    // Let's return a specific structure indicating "not found" for clarity.
+    // However, the schema expects a Drug object or throws.
+    // Best practice: Let the service return null, and the LLM should be prompted
+    // to handle cases where the tool doesn't find data. We'll throw here
+    // only if the service itself fails unexpectedly, but getDrugByName returns null gracefully.
+    // So, we just return the result.
+     return drug; // This will be null if not found
+  }
   return drug;
 });
 
@@ -82,6 +96,11 @@ const deepPurposeTool = ai.defineTool({
 },
 async input => {
   const analysis = await getDeepPurposeAnalysis(input.smiles);
+   if (!analysis) {
+     // Similar to DrugBank, let the service return null if no analysis is generated.
+     // The LLM prompt should instruct how to report this.
+     return analysis; // This will be null if not generated
+   }
   return analysis;
 });
 
@@ -117,8 +136,9 @@ const analysisPrompt = ai.definePrompt({
   2.  **Tool Strategy:** Based on the user query "{{{query}}}" and the basic chemical data (especially the IUPAC name '{{pubChemName}}', if available), decide *if* you need to use 'getDrugByName' (e.g., if the name looks like a drug or the query asks about known drugs) and *if* you need 'getDeepPurposeAnalysis' (e.g., if the query asks about function, mechanism, or potential use).
   3.  **Synthesize:** Generate a comprehensive textual analysis that directly answers the user's query: "{{{query}}}".
       *   Integrate findings from the tools you decided to use. Clearly state the source (e.g., "PubChem indicates...", "DrugBank suggests...", "DeepPurpose predicts...").
+      *   If a tool returns no data (e.g., 'getDrugByName' finds no matching drug), explicitly state that in your analysis (e.g., "No information was found in DrugBank for this compound name."). Do not invent data.
       *   If a target protein ({{{targetProtein}}}) was provided, discuss the candidate's potential relevance to it, drawing connections from the available data (structure, properties, predicted purpose).
-      *   If a tool fails or returns no relevant information, explicitly mention this limitation in your analysis (e.g., "DrugBank information for this name was not found," "DeepPurpose analysis did not yield a specific prediction."). Do not invent data.
+      *   If a tool fails due to an error during its execution (which will be reported back to you), explicitly mention this limitation in your analysis (e.g., "The PubChem tool failed to retrieve data.").
   4.  **Focus:** Your primary output is the single 'synthesizedAnalysis' text block. Do not output raw tool data in this text. The calling function will handle gathering the raw tool outputs separately.
 
   Return ONLY the final, synthesized analysis text.
@@ -155,11 +175,6 @@ const analyzeDrugCandidateFlow = ai.defineFlow<
       console.error(`analyzeDrugCandidateFlow: PubChem lookup failed for SMILES: ${input.smiles}. Aborting analysis.`);
       // Throw an error that the component can catch and display appropriately
       throw new Error(`Essential chemical data could not be retrieved from PubChem for SMILES: ${input.smiles}. Analysis cannot proceed.`);
-      // return {
-      //   synthesizedAnalysis: `Analysis failed: Essential chemical data could not be retrieved from PubChem for SMILES: ${input.smiles}.`,
-      //   drugBankData: null,
-      //   deepPurposeData: null,
-      // };
     }
 
     // Step 2: Run the analysis prompt, providing PubChem name as context
@@ -169,7 +184,12 @@ const analyzeDrugCandidateFlow = ai.defineFlow<
       smiles: pubChemData.canonicalSmiles, // Use canonical SMILES
       pubChemName: pubChemData.iupacName,
     };
-    const { output: llmOutput, history } = await analysisPrompt.withTracking(llmInput);
+    // Call the prompt directly. Genkit handles tool execution and provides history.
+    // The result object contains output and history information.
+    const promptResult = await analysisPrompt(llmInput);
+    const llmOutput = promptResult.output;
+    const history = promptResult.history; // Access history from the result
+
 
      if (!llmOutput?.synthesizedAnalysis) {
         console.error('analyzeDrugCandidateFlow: Analysis prompt returned no synthesized analysis.');
@@ -181,30 +201,46 @@ const analyzeDrugCandidateFlow = ai.defineFlow<
     // Step 3: Extract structured data from the LLM's tool calls in history
     if (history) {
       for (const event of history) {
+         // Check for successful tool responses
         if (event.type === 'toolRequest' && event.toolRequest.toolResponse?.output) {
           const toolName = event.toolRequest.name;
           const toolOutput = event.toolRequest.toolResponse.output;
 
           if (toolName === 'getDrugByName' && toolOutput) {
             try {
-              // Validate the output against the schema
-              drugBankData = DrugSchema.parse(toolOutput);
-              console.log('analyzeDrugCandidateFlow: Extracted DrugBank data:', drugBankData);
+              // Validate the output against the schema. Tool might return null, handle that.
+               if (toolOutput !== null) {
+                    drugBankData = DrugSchema.parse(toolOutput);
+                    console.log('analyzeDrugCandidateFlow: Extracted DrugBank data:', drugBankData);
+               } else {
+                    console.log('analyzeDrugCandidateFlow: DrugBank tool returned null (no data found).');
+                    drugBankData = null;
+               }
             } catch (validationError) {
-              console.warn(`analyzeDrugCandidateFlow: Failed to validate DrugBank tool output:`, validationError);
+              console.warn(`analyzeDrugCandidateFlow: Failed to validate DrugBank tool output:`, validationError, 'Output:', toolOutput);
               // Keep drugBankData as null if validation fails
+              drugBankData = null;
             }
           } else if (toolName === 'getDeepPurposeAnalysis' && toolOutput) {
              try {
-                // Validate the output against the schema
-                deepPurposeData = DeepPurposeResultSchema.parse(toolOutput);
-                console.log('analyzeDrugCandidateFlow: Extracted DeepPurpose data:', deepPurposeData);
+                // Validate the output against the schema. Tool might return null.
+                 if (toolOutput !== null) {
+                    deepPurposeData = DeepPurposeResultSchema.parse(toolOutput);
+                    console.log('analyzeDrugCandidateFlow: Extracted DeepPurpose data:', deepPurposeData);
+                 } else {
+                     console.log('analyzeDrugCandidateFlow: DeepPurpose tool returned null (no prediction).');
+                     deepPurposeData = null;
+                 }
              } catch (validationError) {
-               console.warn(`analyzeDrugCandidateFlow: Failed to validate DeepPurpose tool output:`, validationError);
+               console.warn(`analyzeDrugCandidateFlow: Failed to validate DeepPurpose tool output:`, validationError, 'Output:', toolOutput);
                 // Keep deepPurposeData as null if validation fails
+                deepPurposeData = null;
              }
           }
           // We don't need to extract PubChem data here as we fetched it directly earlier.
+        } else if (event.type === 'toolRequest' && event.toolRequest.toolResponse?.error) {
+             // Log if a tool call resulted in an error during execution
+            console.warn(`analyzeDrugCandidateFlow: Tool '${event.toolRequest.name}' execution failed with error:`, event.toolRequest.toolResponse.error);
         }
       }
     } else {
