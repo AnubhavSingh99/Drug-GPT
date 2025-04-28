@@ -1,3 +1,4 @@
+
 'use client';
 
 import type { AnalyzeDrugCandidateInput, AnalyzeDrugCandidateOutput } from '@/ai/flows/analyze-drug-candidate';
@@ -14,7 +15,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ResultsDisplay } from '@/components/results-display';
-import { VisualizationPlaceholder } from '@/components/visualization-placeholder';
+import { MolecularVisualization } from '@/components/molecular-visualization'; // Import new component
 import { PubChemDetailsCard } from '@/components/pubchem-details-card'; // Import new component
 import { Loader2, TestTubeDiagonal, Target } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
@@ -78,7 +79,7 @@ export function AnalysisForm() {
 
       // 2. Run the main analysis flow
       const input: AnalyzeDrugCandidateInput = {
-        smiles: values.smiles, // Use the original SMILES submitted by the user
+        smiles: moleculeData.canonicalSmiles, // Use canonical SMILES from PubChem for analysis consistency
         targetProtein: values.targetProtein,
         query: values.query,
       };
@@ -199,8 +200,11 @@ export function AnalysisForm() {
         {/* PubChem Details Card */}
         <PubChemDetailsCard molecule={pubChemDetails} isLoading={isFetchingPubChem} />
 
-        {/* Placeholder for Visualization */}
-        <VisualizationPlaceholder />
+        {/* Molecular Visualization */}
+        <MolecularVisualization
+          smiles={pubChemDetails?.canonicalSmiles}
+          isLoading={isFetchingPubChem}
+        />
       </div>
 
        {/* Results Display Area */}
