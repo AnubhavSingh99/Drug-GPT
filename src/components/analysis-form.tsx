@@ -13,11 +13,12 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ResultsDisplay } from '@/components/results-display';
 import { VisualizationPlaceholder } from '@/components/visualization-placeholder';
-import { Loader2, TestTubeDiagonal } from 'lucide-react';
+import { Loader2, TestTubeDiagonal, Target } from 'lucide-react'; // Added Target icon
 import { useToast } from "@/hooks/use-toast";
 
 const formSchema = z.object({
   smiles: z.string().min(1, 'SMILES string is required.'),
+  targetProtein: z.string().optional(), // Added targetProtein field
   query: z.string().min(5, 'Please provide an analysis query (at least 5 characters).'),
 });
 
@@ -33,6 +34,7 @@ export function AnalysisForm() {
     resolver: zodResolver(formSchema),
     defaultValues: {
       smiles: '',
+      targetProtein: '', // Default value for targetProtein
       query: '',
     },
   });
@@ -45,6 +47,7 @@ export function AnalysisForm() {
     try {
       const input: AnalyzeDrugCandidateInput = {
         smiles: values.smiles,
+        targetProtein: values.targetProtein, // Pass targetProtein to the flow
         query: values.query,
       };
       const result = await analyzeDrugCandidate(input);
@@ -76,7 +79,7 @@ export function AnalysisForm() {
               Analyze Drug Candidate
             </CardTitle>
             <CardDescription>
-              Enter a SMILES string and your analysis query to get AI-powered insights.
+              Enter a SMILES string, optional target protein, and your analysis query.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -99,6 +102,24 @@ export function AnalysisForm() {
                     </FormItem>
                   )}
                 />
+                 <FormField
+                  control={form.control}
+                  name="targetProtein"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center">
+                         <Target className="mr-2 h-4 w-4 text-muted-foreground" /> Target Protein (Optional)
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                         placeholder="e.g., ACE2, EGFR" {...field}
+                         aria-label="Target Protein Input"
+                         />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 <FormField
                   control={form.control}
                   name="query"
@@ -107,7 +128,7 @@ export function AnalysisForm() {
                       <FormLabel>Analysis Query</FormLabel>
                       <FormControl>
                         <Textarea
-                          placeholder="e.g., Analyze potential efficacy against target protein XYZ."
+                          placeholder="e.g., Analyze potential efficacy and toxicity."
                           rows={4}
                           {...field}
                            aria-label="Analysis Query Input"

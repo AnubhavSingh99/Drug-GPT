@@ -17,6 +17,10 @@ const AnalyzeDrugCandidateInputSchema = z.object({
   smiles: z
     .string()
     .describe('The SMILES string of the drug candidate.'),
+  targetProtein: z
+    .string()
+    .optional()
+    .describe('The optional target protein for the analysis.'),
   query: z.string().describe('The analysis query from the user.'),
 });
 export type AnalyzeDrugCandidateInput = z.infer<typeof AnalyzeDrugCandidateInputSchema>;
@@ -55,7 +59,7 @@ async input => {
 
 const drugBankTool = ai.defineTool({
   name: 'getDrugByName',
-  description: 'Retrieves drug information from DrugBank based on the drug name.',
+  description: 'Retrieves drug information from DrugBank based on the drug name. Useful if the SMILES string corresponds to a known drug or if the user mentions a specific drug.',
   inputSchema: z.object({
     drugName: z.string().describe('The name of the drug to search for.'),
   }),
@@ -82,6 +86,7 @@ const prompt = ai.definePrompt({
   input: {
     schema: z.object({
       smiles: z.string().describe('The SMILES string of the drug candidate.'),
+      targetProtein: z.string().optional().describe('The optional target protein for the analysis.'),
       query: z.string().describe('The analysis query from the user.'),
     }),
   },
@@ -90,16 +95,26 @@ const prompt = ai.definePrompt({
       analysis: z.string().describe('The analysis of the drug candidate.'),
     }),
   },
-  prompt: `You are an expert pharmaceutical researcher.
+  prompt: `You are an expert pharmaceutical researcher specializing in early-stage drug discovery analysis.
 
-  The user has provided the following SMILES string for a drug candidate: {{{smiles}}}.
-  The user has the following query: {{{query}}}
+  A user has submitted a drug candidate for analysis.
+  SMILES String: {{{smiles}}}
+  {{#if targetProtein}}Target Protein: {{{targetProtein}}}{{/if}}
+  User Query: {{{query}}}
 
-  Use the available tools to research the drug candidate and answer the user's query. If the user mentions a specific drug name, use the drugBankTool to find information about it.
+  Instructions:
+  1.  First, use the 'getMoleculeBySmiles' tool to retrieve basic chemical properties (like molecular weight, formula, IUPAC name if available) for the provided SMILES string. Reference this information in your analysis.
+  2.  If the molecule has an IUPAC name, consider using the 'getDrugByName' tool with that name (or parts of it) to see if it corresponds to a known drug in DrugBank. Also use this tool if the user's query explicitly mentions a known drug name. Integrate any relevant findings from DrugBank (like description or known uses) into your analysis.
+  3.  Address the user's specific query: "{{{query}}}".
+  4.  If a target protein ({{{targetProtein}}}) was provided, specifically discuss the potential interaction, binding affinity (qualitatively if no data is available), or suitability of the candidate for this target, based on its structure and properties obtained from the tools. If no target was provided, focus on general properties, potential applications, or risks based on the query.
+  5.  Provide a concise yet informative analysis. Structure your response clearly. Include potential strengths, weaknesses, or areas for further investigation based on the available data.
+  6.  If the PubChem tool fails or returns no data for the SMILES string, state that clearly and indicate that the analysis is limited due to the lack of basic chemical information. You cannot proceed effectively without molecule data.
+  7.  If the DrugBank tool fails or finds no match for a name derived from PubChem or mentioned by the user, mention that the compound doesn't appear to be a registered drug under that name in the available data.
 
-  Return a detailed analysis of the drug candidate based on the available information.
+  Return only the final analysis as a single string in the 'analysis' field.
 `,
 });
+
 
 const analyzeDrugCandidateFlow = ai.defineFlow<
   typeof AnalyzeDrugCandidateInputSchema,
@@ -112,4 +127,3 @@ const analyzeDrugCandidateFlow = ai.defineFlow<
   const {output} = await prompt(input);
   return output!;
 });
-
