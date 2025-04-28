@@ -8,12 +8,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 interface DrugBankDetailsCardProps {
   drug: Drug | null | undefined; // Accept null or undefined
-  isLoading: boolean; // Indicates if the analysis flow is running
+  isLoading: boolean; // Indicates if the analysis flow is running AND results haven't been received yet
 }
 
 export function DrugBankDetailsCard({ drug, isLoading }: DrugBankDetailsCardProps) {
-  // Show skeleton only if isLoading is true AND we don't have drug data yet.
-  if (isLoading && !drug) {
+  // Show skeleton only if isLoading is true (meaning analysis flow is running and we are waiting for results).
+  if (isLoading) {
     return (
       <Card className="shadow-md animate-pulse mt-4"> {/* Added mt-4 */}
         <CardHeader>
@@ -46,28 +46,13 @@ export function DrugBankDetailsCard({ drug, isLoading }: DrugBankDetailsCardProp
     );
   }
 
-  // If loading is finished and still no drug data, show placeholder/message.
+  // If loading is finished and there is no drug data (explicitly null or undefined),
+  // we don't render the card here. The parent TabsContent should handle the "No data found" message.
   if (!drug) {
-     // Don't render the card if there's simply no data and not loading.
-     // The parent TabsContent handles the "No data found" message.
     return null;
-    // Example placeholder if needed within the card itself:
-    // return (
-    //   <Card className="shadow-md mt-4 border-dashed">
-    //     <CardHeader>
-    //       <CardTitle className="text-xl flex items-center">
-    //         <Pill className="mr-2 h-5 w-5 text-muted-foreground" />
-    //         DrugBank Information
-    //       </CardTitle>
-    //     </CardHeader>
-    //     <CardContent className="pt-6 text-center text-muted-foreground">
-    //       DrugBank details will appear here if relevant.
-    //     </CardContent>
-    //   </Card>
-    // );
   }
 
-  // If we have drug data
+  // If we have drug data (and isLoading is false)
   return (
     <Card className="shadow-md mt-4"> {/* Added mt-4 */}
       <CardHeader>
@@ -90,7 +75,7 @@ export function DrugBankDetailsCard({ drug, isLoading }: DrugBankDetailsCardProp
              <span className="font-medium text-muted-foreground block mb-1 flex items-center">
                 <FileText className="mr-1.5 h-4 w-4" /> Description / Indication:
             </span>
-             <p className="whitespace-pre-wrap">{drug.description}</p>
+             <p className="whitespace-pre-wrap text-foreground/90">{drug.description}</p> {/* Slightly muted description */}
            </div>
          )}
          {drug.molecularFormula && (
@@ -109,3 +94,5 @@ export function DrugBankDetailsCard({ drug, isLoading }: DrugBankDetailsCardProp
     </Card>
   );
 }
+
+    

@@ -10,12 +10,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 
 interface DeepPurposeDetailsCardProps {
   result: DeepPurposeResult | null | undefined; // Accept null or undefined
-  isLoading: boolean; // Indicates if the analysis flow is running
+  isLoading: boolean; // Indicates if the analysis flow is running AND results haven't been received yet
 }
 
 export function DeepPurposeDetailsCard({ result, isLoading }: DeepPurposeDetailsCardProps) {
-  // Show skeleton only if isLoading is true AND we don't have result data yet.
-  if (isLoading && !result) {
+  // Show skeleton only if isLoading is true (meaning analysis flow is running and we are waiting for results).
+  if (isLoading) {
      return (
       <Card className="shadow-md animate-pulse mt-4"> {/* Added mt-4 */}
         <CardHeader>
@@ -37,28 +37,13 @@ export function DeepPurposeDetailsCard({ result, isLoading }: DeepPurposeDetails
     );
   }
 
-  // If loading is finished and still no result (or explicitly null/undefined), show placeholder/message.
+  // If loading is finished and there is no result data (explicitly null or undefined),
+  // we don't render the card here. The parent TabsContent should handle the "No data found" message.
   if (!result) {
-     // Don't render the card if there's simply no data and not loading.
-     // The parent TabsContent handles the "No data found" message.
     return null;
-    // Example placeholder if needed within the card itself:
-    // return (
-    //   <Card className="shadow-md mt-4 border-dashed">
-    //     <CardHeader>
-    //        <CardTitle className="text-xl flex items-center">
-    //          <BrainCircuit className="mr-2 h-5 w-5 text-muted-foreground" />
-    //          DeepPurpose Prediction
-    //       </CardTitle>
-    //     </CardHeader>
-    //     <CardContent className="pt-6 text-center text-muted-foreground">
-    //       DeepPurpose prediction details will appear here if generated.
-    //     </CardContent>
-    //   </Card>
-    // );
   }
 
-  // If we have result data
+  // If we have result data (and isLoading is false)
   const confidenceValue = result.confidence !== undefined ? result.confidence * 100 : null;
 
   return (
@@ -96,6 +81,7 @@ export function DeepPurposeDetailsCard({ result, isLoading }: DeepPurposeDetails
              <Progress value={confidenceValue} className="h-2" />
           </div>
         )}
+         {/* Display message if confidence is explicitly undefined in the result */}
          {result.confidence === undefined && (
              <div className="flex items-center text-muted-foreground text-xs pt-2">
                 <HelpCircle className="h-3 w-3 mr-1"/>
@@ -106,3 +92,5 @@ export function DeepPurposeDetailsCard({ result, isLoading }: DeepPurposeDetails
     </Card>
   );
 }
+
+    

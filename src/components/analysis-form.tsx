@@ -55,7 +55,9 @@ type FormData = z.infer<typeof formSchema>;
 // Simple regex to guess if a string might be a formula instead of SMILES
 const seemsLikeFormula = (input: string): boolean => {
    if (/\s/.test(input)) return false;
-   return /([A-Za-z][2-9])|([A-Za-z]\d{2,})|(\d[A-Za-z])/.test(input);
+   // Look for patterns like C2, H10, O3, etc., but avoid things like C(=O)
+   // This is a rough heuristic.
+   return /([A-Z][a-z]?\d{2,})|([A-Z][a-z]?[2-9](?![a-zA-Z\(]))/.test(input);
 };
 
 export function AnalysisForm() {
@@ -63,8 +65,9 @@ export function AnalysisForm() {
   const [analysisResult, setAnalysisResult] = useState<AnalyzeDrugCandidateOutput | null>(null);
   const [pubChemDetails, setPubChemDetails] = useState<Molecule | null>(null);
   const [isLoading, setIsLoading] = useState(false); // Combined loading state
+  const [loadingStage, setLoadingStage] = useState<'idle' | 'pubchem' | 'analysis'>('idle'); // Track loading stage
   const [error, setError] = useState<Error | null>(null);
-  const [activeTab, setActiveTab] = useState("analysis"); // Default tab
+  const [activeTab, setActiveTab] = useState("pubchem"); // Default tab
   const { toast } = useToast();
 
   const form = useForm<FormData>({
@@ -77,17 +80,23 @@ export function AnalysisForm() {
   });
 
   async function onSubmit(values: FormData) {
+    console.log("Form submitted with values:", values);
     setIsLoading(true);
     setError(null);
     setAnalysisResult(null);
     setPubChemDetails(null);
+    setLoadingStage('pubchem');
     setActiveTab("pubchem"); // Switch to PubChem tab initially
 
     try {
       // 1. Fetch PubChem data first (essential)
+       console.log("Step 1: Calling getMoleculeBySmiles...");
       const moleculeData = await getMoleculeBySmiles(values.smiles);
+      console.log("Step 1: getMoleculeBySmiles returned:", moleculeData);
+
 
       if (!moleculeData) {
+        console.log("Step 1: PubChem data not found.");
         const inputIsLikelyFormula = seemsLikeFormula(values.smiles);
         const errorDescription = inputIsLikelyFormula
           ? `Invalid input: "${values.smiles}" looks like a molecular formula, not a SMILES string. Please provide a structural representation (e.g., 'c1ccccc1').`
@@ -99,25 +108,30 @@ export function AnalysisForm() {
           description: errorDescription,
         });
         setError(new Error('Failed to fetch PubChem data. Check SMILES validity.'));
+        setLoadingStage('idle');
         setIsLoading(false);
         return;
       }
 
+      console.log("Step 1: PubChem data fetched successfully.");
       setPubChemDetails(moleculeData);
       toast({
          title: "PubChem Data Fetched",
          description: `Successfully retrieved details for CID ${moleculeData.cid}. Now running analysis...`,
       });
-       setActiveTab("analysis"); // Switch to analysis tab after PubChem success
+      setLoadingStage('analysis'); // Update loading stage
+      setActiveTab("analysis"); // Switch to analysis tab after PubChem success
 
 
       // 2. Run the main analysis flow
+       console.log("Step 2: Calling analyzeDrugCandidate...");
       const input: AnalyzeDrugCandidateInput = {
         smiles: moleculeData.canonicalSmiles, // Use canonical SMILES
         targetProtein: values.targetProtein,
         query: values.query,
       };
       const result = await analyzeDrugCandidate(input);
+      console.log("Step 2: analyzeDrugCandidate returned:", result);
       setAnalysisResult(result);
       toast({
         title: "Analysis Complete",
@@ -125,7 +139,7 @@ export function AnalysisForm() {
       });
 
     } catch (err: any) {
-      console.error('Analysis error:', err);
+      console.error('Analysis error caught in form:', err);
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred during analysis.';
       setError(err instanceof Error ? err : new Error(errorMessage));
       toast({
@@ -135,14 +149,28 @@ export function AnalysisForm() {
       });
        // Clear AI results on error, but keep PubChem data if it was fetched
        setAnalysisResult(null);
-       // setActiveTab("error"); // Or keep the current tab, maybe pubchem?
-       if (!pubChemDetails) setActiveTab("pubchem"); // Go back to pubchem if it failed there
-       else setActiveTab("analysis"); // Otherwise show the analysis tab with the error
+       // Stay on the current tab or switch based on where the error happened
+       if (loadingStage === 'pubchem') {
+            setActiveTab("pubchem"); // Error happened during PubChem fetch
+       } else {
+           setActiveTab("analysis"); // Error happened during AI analysis, show error there
+       }
+
 
     } finally {
+      console.log("Analysis process finished (finally block).");
+      setLoadingStage('idle');
       setIsLoading(false);
     }
   }
+
+  // Determine if tabs should be enabled based on loading state and data presence
+  const isPubChemTabDisabled = !pubChemDetails && loadingStage !== 'pubchem';
+  const isAnalysisRunning = loadingStage === 'analysis';
+  const isDrugBankTabDisabled = (!analysisResult?.drugBankData && !isAnalysisRunning) || isLoading;
+  const isDeepPurposeTabDisabled = (!analysisResult?.deepPurposeData && !isAnalysisRunning) || isLoading;
+  const isAnalysisTabDisabled = (!analysisResult?.synthesizedAnalysis && !isAnalysisRunning && !error) || isLoading;
+
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -221,7 +249,7 @@ export function AnalysisForm() {
                   {isLoading ? (
                      <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      {pubChemDetails ? 'Analyzing...' : 'Fetching PubChem Data...'}
+                      {loadingStage === 'pubchem' ? 'Fetching PubChem Data...' : 'Analyzing...'}
                     </>
                   ) : (
                     'Run Analysis'
@@ -235,28 +263,28 @@ export function AnalysisForm() {
          {/* Molecular Visualization */}
          <MolecularVisualization
           smiles={pubChemDetails?.canonicalSmiles}
-          isLoading={isLoading && !pubChemDetails} // Loading only when fetching pubchem
+          isLoading={loadingStage === 'pubchem'} // Loading only when fetching pubchem
         />
       </div>
 
       {/* Right Column: Results Tabs */}
       <div className="space-y-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="pubchem" disabled={!pubChemDetails && !isLoading}>PubChem</TabsTrigger>
-            <TabsTrigger value="drugbank" disabled={!analysisResult?.drugBankData && !isLoading}>DrugBank</TabsTrigger>
-            <TabsTrigger value="deeppurpose" disabled={!analysisResult?.deepPurposeData && !isLoading}>DeepPurpose</TabsTrigger>
-            <TabsTrigger value="analysis" disabled={!analysisResult?.synthesizedAnalysis && !isLoading && !error}>Analysis</TabsTrigger>
+           <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="pubchem" disabled={isPubChemTabDisabled && !isLoading}>PubChem</TabsTrigger>
+            <TabsTrigger value="drugbank" disabled={isDrugBankTabDisabled}>DrugBank</TabsTrigger>
+            <TabsTrigger value="deeppurpose" disabled={isDeepPurposeTabDisabled}>DeepPurpose</TabsTrigger>
+            <TabsTrigger value="analysis" disabled={isAnalysisTabDisabled}>Analysis</TabsTrigger>
           </TabsList>
 
           {/* PubChem Tab Content */}
           <TabsContent value="pubchem">
-             <PubChemDetailsCard molecule={pubChemDetails} isLoading={isLoading && !pubChemDetails} />
-             {/* Placeholder or message if no data yet */}
-             {!pubChemDetails && !isLoading && (
+             <PubChemDetailsCard molecule={pubChemDetails} isLoading={loadingStage === 'pubchem'} />
+             {/* Placeholder or message if no data yet and not loading */}
+             {!pubChemDetails && !isLoading && !error && (
                 <Card className="shadow-md mt-4 border-dashed">
                     <CardContent className="pt-6 text-center text-muted-foreground">
-                        PubChem details will appear here after fetching.
+                        PubChem details will appear here after submitting a valid SMILES string.
                     </CardContent>
                 </Card>
              )}
@@ -264,17 +292,23 @@ export function AnalysisForm() {
 
           {/* DrugBank Tab Content */}
            <TabsContent value="drugbank">
-             <DrugBankDetailsCard drug={analysisResult?.drugBankData} isLoading={isLoading && !analysisResult} />
+              {/* Show card only if loading or data exists */}
+              {(isAnalysisRunning || analysisResult?.drugBankData) && (
+                 <DrugBankDetailsCard
+                    drug={analysisResult?.drugBankData}
+                    isLoading={isAnalysisRunning && !analysisResult} // Loading if analysis is running AND we don't have results yet
+                />
+              )}
               {/* Message if analysis ran but no DrugBank data was found/returned */}
-             {!isLoading && analysisResult && !analysisResult.drugBankData && (
+              {!isLoading && analysisResult && !analysisResult.drugBankData && (
                  <Card className="shadow-md mt-4 border-dashed">
                     <CardContent className="pt-6 text-center text-muted-foreground">
-                        No specific DrugBank information was found or relevant for this analysis.
+                        No relevant DrugBank information was found or requested for this analysis.
                     </CardContent>
                 </Card>
              )}
-              {/* Placeholder before analysis runs */}
-               {!isLoading && !analysisResult && !error && (
+              {/* Placeholder before analysis runs or if no data expected */}
+               {!isLoading && !analysisResult && !error && !pubChemDetails && (
                  <Card className="shadow-md mt-4 border-dashed">
                     <CardContent className="pt-6 text-center text-muted-foreground">
                        DrugBank details will appear here if relevant to the analysis.
@@ -285,17 +319,23 @@ export function AnalysisForm() {
 
           {/* DeepPurpose Tab Content */}
            <TabsContent value="deeppurpose">
-             <DeepPurposeDetailsCard result={analysisResult?.deepPurposeData} isLoading={isLoading && !analysisResult} />
+              {/* Show card only if loading or data exists */}
+               {(isAnalysisRunning || analysisResult?.deepPurposeData) && (
+                 <DeepPurposeDetailsCard
+                    result={analysisResult?.deepPurposeData}
+                    isLoading={isAnalysisRunning && !analysisResult} // Loading if analysis is running AND we don't have results yet
+                 />
+              )}
               {/* Message if analysis ran but no DeepPurpose data was found/returned */}
               {!isLoading && analysisResult && !analysisResult.deepPurposeData && (
                  <Card className="shadow-md mt-4 border-dashed">
                     <CardContent className="pt-6 text-center text-muted-foreground">
-                       No DeepPurpose prediction was generated or relevant for this analysis.
+                       No DeepPurpose prediction was generated or requested for this analysis.
                     </CardContent>
                 </Card>
              )}
-              {/* Placeholder before analysis runs */}
-               {!isLoading && !analysisResult && !error && (
+              {/* Placeholder before analysis runs or if no data expected */}
+               {!isLoading && !analysisResult && !error && !pubChemDetails && (
                  <Card className="shadow-md mt-4 border-dashed">
                     <CardContent className="pt-6 text-center text-muted-foreground">
                        DeepPurpose prediction details will appear here if relevant to the analysis.
@@ -309,13 +349,13 @@ export function AnalysisForm() {
              <ResultsDisplay
                 results={analysisResult ? { analysis: analysisResult.synthesizedAnalysis } : null} // Pass only synthesis here
                 error={error} // Pass the main error state
-                isLoading={isLoading && pubChemDetails != null} // Loading is true only *after* pubchem fetch succeeds
+                isLoading={isAnalysisRunning && !analysisResult} // Loading is true only *after* pubchem fetch succeeds and *before* AI analysis completes
                 />
                 {/* Placeholder before analysis runs */}
-               {!isLoading && !analysisResult && !error && (
+               {!isLoading && !analysisResult && !error && !pubChemDetails && (
                  <Card className="shadow-md mt-4 border-dashed">
                     <CardContent className="pt-6 text-center text-muted-foreground">
-                       Synthesized analysis results will appear here.
+                       Synthesized analysis results will appear here after submitting the form.
                     </CardContent>
                 </Card>
              )}
@@ -325,3 +365,6 @@ export function AnalysisForm() {
     </div>
   );
 }
+
+
+    

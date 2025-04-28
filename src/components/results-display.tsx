@@ -8,7 +8,9 @@ interface ResultsDisplayProps {
   // Accept only the synthesized analysis string (or the full output if needed later)
   results: { analysis: string } | null;
   error: Error | null;
-  isLoading: boolean; // This represents the AI analysis *flow* loading state (after PubChem)
+  // isLoading should be true specifically when the AI analysis flow is running
+  // (i.e., after PubChem data is fetched successfully but before AI results are back)
+  isLoading: boolean;
 }
 
 export function ResultsDisplay({ results, error, isLoading }: ResultsDisplayProps) {
@@ -18,28 +20,28 @@ export function ResultsDisplay({ results, error, isLoading }: ResultsDisplayProp
       <Card className="shadow-md animate-pulse mt-4"> {/* Added mt-4 */}
         <CardHeader>
            <CardTitle className="text-xl flex items-center">
-             <Bot className="mr-2 h-5 w-5 text-muted-foreground" /> Analysis Results
+             <Bot className="mr-2 h-5 w-5 text-muted-foreground" /> Synthesized Analysis
            </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 pt-4"> {/* Added pt-4 */}
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-5/6" />
+           <Skeleton className="h-4 w-[80%]" />
            <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-3/4" />
-           <Skeleton className="h-4 w-4/6" />
+           <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-[90%]" />
+           <Skeleton className="h-4 w-[60%]" />
         </CardContent>
       </Card>
     );
   }
 
-  // Display error if it occurred during the analysis flow
+  // Display error if it occurred (could be PubChem error passed down or AI analysis error)
   if (error) {
     return (
        <Alert variant="destructive" className="shadow-md mt-4"> {/* Added mt-4 */}
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Analysis Error</AlertTitle>
           <AlertDescription>
-             {error.message || 'An unexpected error occurred during analysis.'}
+             {error.message || 'An unexpected error occurred.'}
               {/* Specific guidance for common errors */}
                {error.message.includes('PubChem') && !error.message.includes('property fetch') && (
                   <p className="mt-2 text-xs"> This usually means the provided SMILES string is invalid or not found in PubChem. Please check the SMILES and try again.</p>
@@ -53,22 +55,12 @@ export function ResultsDisplay({ results, error, isLoading }: ResultsDisplayProp
   }
 
    // Don't display the card if there are no results yet and no error/loading for analysis.
-   // The parent TabsContent handles the main placeholder.
+   // The parent TabsContent handles the main placeholder when nothing has run.
   if (!results?.analysis) {
+    // Only return null if not loading and no error exists.
+    // If analysis ran but returned empty string (unlikely with current setup), this would also hit.
+    // The parent component handles the initial "waiting for submission" placeholder.
     return null;
-     // Example placeholder if needed within the card itself:
-     // return (
-     //    <Card className="shadow-md mt-4 border-dashed">
-     //       <CardHeader>
-     //          <CardTitle className="text-xl flex items-center">
-     //              <Bot className="mr-2 h-5 w-5 text-muted-foreground" /> Analysis Results
-     //          </CardTitle>
-     //        </CardHeader>
-     //       <CardContent className="pt-6 text-center text-muted-foreground">
-     //          Synthesized analysis results will appear here.
-     //       </CardContent>
-     //    </Card>
-     // );
   }
 
   // Display the synthesized analysis results
@@ -81,8 +73,10 @@ export function ResultsDisplay({ results, error, isLoading }: ResultsDisplayProp
       </CardHeader>
       <CardContent className="pt-4"> {/* Added pt-4 */}
         {/* Use whitespace-pre-wrap to preserve line breaks and wrap long lines */}
-        <p className="text-foreground whitespace-pre-wrap">{results.analysis}</p>
+        <p className="text-foreground whitespace-pre-wrap leading-relaxed">{results.analysis}</p>
       </CardContent>
     </Card>
   );
 }
+
+    
