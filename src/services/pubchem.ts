@@ -35,31 +35,48 @@ const PUBCHEM_API_BASE = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug';
  */
 async function getCidBySmiles(smiles: string): Promise<number | null> {
   try {
-    const encodedSmiles = encodeURIComponent(smiles);
+    // Basic check for empty/invalid SMILES input
+    if (!smiles || typeof smiles !== 'string' || smiles.trim() === '') {
+        console.warn(`Invalid SMILES string provided for CID lookup: "${smiles}"`);
+        return null;
+    }
+    const encodedSmiles = encodeURIComponent(smiles.trim());
     const url = `${PUBCHEM_API_BASE}/compound/smiles/${encodedSmiles}/cids/JSON`;
     // console.log(`Fetching CID for SMILES: ${smiles} from URL: ${url}`); // Debug log
     const response = await fetch(url);
 
     if (!response.ok) {
-      console.error(`PubChem CID lookup failed for SMILES ${smiles}: ${response.status} ${response.statusText}`);
+      // Log specific PubChem error if available
+      let errorDetails = `${response.status} ${response.statusText}`;
       try {
         const errorData = await response.json();
         console.error('PubChem CID lookup error details:', errorData);
+        if(errorData.Fault) {
+            errorDetails += ` - ${errorData.Fault.Code}: ${errorData.Fault.Message}`;
+        }
       } catch (e) { /* Ignore JSON parsing error if body is not JSON */ }
+      console.error(`PubChem CID lookup failed for SMILES "${smiles}": ${errorDetails}`);
       return null;
     }
 
     const data = await response.json();
 
     if (!data || !data.IdentifierList || !data.IdentifierList.CID || data.IdentifierList.CID.length === 0) {
-      console.warn(`No CID found for SMILES: ${smiles}`);
+      console.warn(`No CID found for SMILES: "${smiles}"`);
       return null;
     }
 
-    // console.log(`Found CID ${data.IdentifierList.CID[0]} for SMILES: ${smiles}`); // Debug log
-    return data.IdentifierList.CID[0]; // Return the first CID found
+    const cid = data.IdentifierList.CID[0];
+     // Ensure the CID is a positive number
+    if (typeof cid !== 'number' || cid <= 0) {
+        console.warn(`Invalid CID (${cid}) received for SMILES: "${smiles}"`);
+        return null;
+    }
+
+    // console.log(`Found CID ${cid} for SMILES: ${smiles}`); // Debug log
+    return cid;
   } catch (error) {
-    console.error(`Error during CID lookup for SMILES ${smiles}:`, error);
+    console.error(`Error during CID lookup for SMILES "${smiles}":`, error);
     return null;
   }
 }
@@ -67,10 +84,16 @@ async function getCidBySmiles(smiles: string): Promise<number | null> {
 /**
  * Fetches molecule properties from PubChem using the CID.
  * Handles potential API errors and incomplete data gracefully.
- * @param cid The PubChem CID.
+ * @param cid The PubChem CID. Must be a positive integer.
  * @returns A promise that resolves to a Molecule object, or null if properties are not found or on error.
  */
 async function getPropertiesByCid(cid: number): Promise<Molecule | null> {
+   // Pre-check for invalid CID
+   if (typeof cid !== 'number' || cid <= 0) {
+        console.error(`Invalid CID provided for property fetch: ${cid}`);
+        return null;
+   }
+
    try {
     const propertiesList = 'MolecularFormula,IUPACName,CanonicalSMILES,MolecularWeight';
     const url = `${PUBCHEM_API_BASE}/compound/cid/${cid}/property/${propertiesList}/JSON`;
@@ -78,12 +101,17 @@ async function getPropertiesByCid(cid: number): Promise<Molecule | null> {
     const response = await fetch(url);
 
      if (!response.ok) {
-      console.error(`PubChem property fetch failed for CID ${cid}: ${response.status} ${response.statusText}`);
-       try {
-        const errorData = await response.json();
-        console.error('PubChem property fetch error details:', errorData);
-      } catch (e) { /* Ignore JSON parsing error if body is not JSON */ }
-      return null;
+        // Log specific PubChem error if available
+        let errorDetails = `${response.status} ${response.statusText}`;
+        try {
+            const errorData = await response.json();
+            console.error('PubChem property fetch error details:', errorData);
+            if(errorData.Fault) {
+                errorDetails += ` - ${errorData.Fault.Code}: ${errorData.Fault.Message}`;
+            }
+        } catch (e) { /* Ignore JSON parsing error if body is not JSON */ }
+        console.error(`PubChem property fetch failed for CID ${cid}: ${errorDetails}`);
+        return null;
     }
 
      const data = await response.json();
@@ -95,29 +123,35 @@ async function getPropertiesByCid(cid: number): Promise<Molecule | null> {
 
      const properties = data.PropertyTable.Properties[0];
 
+     // Validate essential properties received from PubChem
+     if (!properties.CID || !properties.MolecularFormula || !properties.CanonicalSMILES || !properties.MolecularWeight) {
+       console.error(`Incomplete essential data received from PubChem for CID: ${cid}`, properties);
+       return null; // Return null if critical data is missing
+     }
+
      // Convert MolecularWeight to number, handle potential non-numeric values
      const molecularWeight = parseFloat(properties.MolecularWeight);
      if (isNaN(molecularWeight)) {
-        console.error(`Invalid MolecularWeight received from PubChem for CID: ${cid}`, properties.MolecularWeight);
+        console.error(`Invalid MolecularWeight received from PubChem for CID ${cid}: "${properties.MolecularWeight}"`);
         // Decide how to handle: return null or proceed without weight? Returning null for safety.
         return null;
      }
 
 
-     // Ensure essential properties exist (IUPACName is optional)
-     // Use || '' to provide default empty string if a property is missing but not essential
+     // Construct the molecule object
+     // Use || '' to provide default empty string if a property is missing but not essential (like IUPACName)
      const molecule: Molecule = {
-        cid: properties.CID,
-        molecularFormula: properties.MolecularFormula || '',
+        cid: properties.CID, // Should match input CID
+        molecularFormula: properties.MolecularFormula,
         iupacName: properties.IUPACName, // Can be undefined/null
-        canonicalSmiles: properties.CanonicalSMILES || '',
+        canonicalSmiles: properties.CanonicalSMILES,
         molecularWeight: molecularWeight,
      };
 
-      // Check if *essential* non-optional fields are missing after assignment
+     // Final check on constructed object (redundant if initial check is good, but safe)
      if (!molecule.cid || !molecule.molecularFormula || !molecule.canonicalSmiles) {
-       console.error(`Incomplete essential data received from PubChem for CID: ${cid}`, properties);
-       return null; // Return null if critical data is missing
+        console.error(`Failed to construct valid molecule object from PubChem data for CID: ${cid}`, molecule);
+        return null;
      }
 
      // console.log(`Successfully fetched properties for CID: ${cid}`, molecule); // Debug log
@@ -142,10 +176,10 @@ export async function getMoleculeBySmiles(smiles: string): Promise<Molecule | nu
   // console.log(`Starting PubChem lookup for SMILES: ${smiles}`); // Debug log
   const cid = await getCidBySmiles(smiles);
 
-  if (cid === null) {
-     // Error/warning logged in getCidBySmiles
-    console.log(`PubChem lookup failed at CID stage for SMILES: ${smiles}`); // Debug log
-    return null;
+  // Ensure CID is valid (not null and positive number) before proceeding
+  if (cid === null || cid <= 0) {
+    console.log(`PubChem lookup failed or returned invalid CID (${cid}) for SMILES: "${smiles}"`);
+    return null; // Exit early if CID is invalid or not found
   }
 
    // Add a small delay between API calls as recommended by PubChem guidelines
@@ -153,12 +187,12 @@ export async function getMoleculeBySmiles(smiles: string): Promise<Molecule | nu
   await new Promise(resolve => setTimeout(resolve, 200));
 
 
-  // Step 2: Get properties using CID
+  // Step 2: Get properties using the *validated* CID
   const moleculeData = await getPropertiesByCid(cid);
 
    if (moleculeData === null) {
      // Error/warning logged in getPropertiesByCid
-     console.log(`PubChem lookup failed at properties stage for CID: ${cid} (SMILES: ${smiles})`); // Debug log
+     console.log(`PubChem lookup failed at properties stage for CID: ${cid} (SMILES: "${smiles}")`); // Debug log
      return null;
    }
 
