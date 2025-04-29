@@ -1,13 +1,11 @@
 
 'use client';
 
-// Import locally defined types from flow or shared types file
+// Import flow types including Molprop
 import type { AnalyzeDrugCandidateInput, AnalyzeDrugCandidateOutput } from '@/ai/flows/analyze-drug-candidate';
 import { analyzeDrugCandidate } from '@/ai/flows/analyze-drug-candidate';
-// Remove Molecule type import from pubchem service as it's now inline in the flow output
-// import type { Molecule } from '@/services/pubchem';
-// Remove pubchem service import as the tool handles it now
-// import { getMoleculeBySmiles } from '@/services/pubchem';
+// Import Molprop type
+import type { MolpropResult } from '@/services/molprop';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -19,9 +17,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ResultsDisplay } from '@/components/results-display';
 import { PubChemDetailsCard } from '@/components/pubchem-details-card';
-import { DeepPurposeDetailsCard } from '@/components/deeppurpose-details-card';
-// Remove ChemblDetailsCard import
-// import { ChemblDetailsCard } from '@/components/chembl-details-card';
+// Import the new Molprop details card
+import { MolpropDetailsCard } from '@/components/molprop-details-card';
 import { Loader2, TestTubeDiagonal, Target } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import dynamic from 'next/dynamic';
@@ -37,7 +34,7 @@ interface Molecule {
   molecularWeight: number;
 }
 
-
+// Dynamic import for molecular visualization
 const MolecularVisualization = dynamic(
   () => import('@/components/molecular-visualization').then((mod) => mod.MolecularVisualization),
   {
@@ -55,7 +52,7 @@ const MolecularVisualization = dynamic(
   }
 );
 
-
+// Form schema remains the same
 const formSchema = z.object({
   smiles: z.string().min(1, 'SMILES string is required.'),
   targetProtein: z.string().optional(),
@@ -64,19 +61,15 @@ const formSchema = z.object({
 
 type FormData = z.infer<typeof formSchema>;
 
-// Helper function to give better error message if input resembles a formula
+// Helper function for basic SMILES/formula check
 const seemsLikeFormula = (input: string): boolean => {
-   if (/\s/.test(input)) return false; // SMILES usually don't have spaces
-   // Very basic check: looks for multiple uppercase letters followed by numbers > 1, or single letters with numbers > 1
+   if (/\s/.test(input)) return false;
    return /([A-Z][a-z]?\d{2,})|([A-Z][a-z]?[2-9](?![a-zA-Z\(]))/.test(input);
 };
 
 export function AnalysisForm() {
   const [analysisResult, setAnalysisResult] = useState<AnalyzeDrugCandidateOutput | null>(null);
-  // pubChemDetails is now derived from analysisResult.pubChemData
-  // const [pubChemDetails, setPubChemDetails] = useState<Molecule | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  // Simplified loading stage
   const [loadingStage, setLoadingStage] = useState<'idle' | 'analysis'>('idle');
   const [error, setError] = useState<Error | null>(null);
   // Default to PubChem tab initially
@@ -97,13 +90,10 @@ export function AnalysisForm() {
     setIsLoading(true);
     setError(null);
     setAnalysisResult(null);
-    // No separate pubchem stage needed, flow handles it
     setLoadingStage('analysis');
-    // Switch to analysis tab view immediately
-    setActiveTab("analysis");
+    setActiveTab("analysis"); // Switch to analysis tab view immediately
 
     try {
-      // Input for the flow remains the same
       const input: AnalyzeDrugCandidateInput = {
         smiles: values.smiles,
         targetProtein: values.targetProtein,
@@ -114,13 +104,12 @@ export function AnalysisForm() {
       const result = await analyzeDrugCandidate(input);
       console.log("analyzeDrugCandidate flow returned:", result);
 
-       // Check if PubChem data exists in the result (it should if the flow succeeded)
        if (!result.pubChemData) {
             console.error("Analysis flow succeeded but missing PubChem data unexpectedly.");
             throw new Error("Analysis completed, but essential PubChem data is missing.");
        }
 
-       setAnalysisResult(result); // Set the full result
+       setAnalysisResult(result);
 
       toast({
         title: "Analysis Complete",
@@ -132,7 +121,6 @@ export function AnalysisForm() {
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred during analysis.';
       setError(err instanceof Error ? err : new Error(errorMessage));
 
-      // Provide more specific error feedback
       let toastDescription = errorMessage;
        if (errorMessage.includes('PubChem tool execution failed')) {
           const inputIsLikelyFormula = seemsLikeFormula(values.smiles);
@@ -142,8 +130,10 @@ export function AnalysisForm() {
         } else if (errorMessage.includes('Analysis failed: The AI model did not generate')) {
           toastDescription = 'The AI failed to generate an analysis. This might be a temporary issue or the query/molecule is complex.';
         } else if (errorMessage.includes('Analysis Flow Error:')) {
-            // Use the core message from the flow error
             toastDescription = errorMessage.replace('Analysis Flow Error: ', '');
+             if (errorMessage.includes('Molprop tool execution failed')) {
+                toastDescription = `Failed to get Molprop predictions for ${values.smiles}. The Molprop service might be unavailable or the SMILES invalid for prediction.`;
+             }
         }
 
 
@@ -153,7 +143,6 @@ export function AnalysisForm() {
         description: toastDescription,
       });
        setAnalysisResult(null);
-       // Keep analysis tab active on error to show the error message
        setActiveTab("analysis");
 
     } finally {
@@ -163,13 +152,15 @@ export function AnalysisForm() {
     }
   }
 
-  // Derive PubChem details from the analysis result
+  // Derive PubChem and Molprop details from the analysis result
   const pubChemDetails = analysisResult?.pubChemData;
+  const molpropDetails = analysisResult?.molpropData; // Use molpropData
 
   // Simplified tab disabling logic
   const isAnalysisRunning = loadingStage === 'analysis';
   const isPubChemTabDisabled = !pubChemDetails && !isAnalysisRunning;
-  const isDeepPurposeTabDisabled = !analysisResult?.deepPurposeData && !isAnalysisRunning;
+  // Update disabling logic for Molprop tab
+  const isMolpropTabDisabled = !molpropDetails && !isAnalysisRunning;
   const isAnalysisTabDisabled = !analysisResult?.synthesizedAnalysis && !isAnalysisRunning && !error;
 
 
@@ -262,32 +253,27 @@ export function AnalysisForm() {
         </Card>
 
          <MolecularVisualization
-          // Pass canonical SMILES from PubChem details if available
           smiles={pubChemDetails?.canonicalSmiles}
-          // Visualization loading is tied to the overall analysis loading state
           isLoading={isAnalysisRunning && !pubChemDetails}
         />
       </div>
 
       {/* Right Column: Results Tabs */}
       <div className="space-y-8">
-         {/* Updated grid cols to 3 */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-           <TabsList className="grid w-full grid-cols-3">
+           <TabsList className="grid w-full grid-cols-3"> {/* Ensure 3 columns */}
             <TabsTrigger value="pubchem" disabled={isPubChemTabDisabled}>PubChem</TabsTrigger>
-            {/* Removed Database tab trigger */}
-            <TabsTrigger value="deeppurpose" disabled={isDeepPurposeTabDisabled}>DeepPurpose</TabsTrigger>
+            {/* Update trigger for Molprop */}
+            <TabsTrigger value="molprop" disabled={isMolpropTabDisabled}>Molprop</TabsTrigger>
             <TabsTrigger value="analysis" disabled={isAnalysisTabDisabled}>Analysis</TabsTrigger>
           </TabsList>
 
           {/* PubChem Tab Content */}
           <TabsContent value="pubchem">
-             {/* Pass derived pubChemDetails and loading state */}
              <PubChemDetailsCard
                 molecule={pubChemDetails}
                 isLoading={isAnalysisRunning && !pubChemDetails}
              />
-             {/* Placeholder when no analysis has run yet */}
              {!isLoading && !analysisResult && !error && (
                 <Card className="shadow-md mt-4 border-dashed">
                     <CardContent className="pt-6 text-center text-muted-foreground">
@@ -297,20 +283,19 @@ export function AnalysisForm() {
              )}
           </TabsContent>
 
-          {/* Removed Database (ChEMBL) Tab Content */}
-
-          {/* DeepPurpose Tab Content */}
-           <TabsContent value="deeppurpose">
-               {(isAnalysisRunning || analysisResult?.deepPurposeData) && (
-                 <DeepPurposeDetailsCard
-                    result={analysisResult?.deepPurposeData}
-                    isLoading={isAnalysisRunning && !analysisResult?.deepPurposeData} // Show loading until DP data specifically arrives
+          {/* Molprop Tab Content */}
+           <TabsContent value="molprop">
+               {(isAnalysisRunning || molpropDetails) && (
+                 <MolpropDetailsCard
+                    result={molpropDetails} // Pass molprop details
+                    isLoading={isAnalysisRunning && !molpropDetails} // Show loading until Molprop data specifically arrives
                  />
               )}
-              {!isLoading && analysisResult && !analysisResult.deepPurposeData && (
+              {/* Message when Molprop data is explicitly null/undefined after analysis */}
+              {!isLoading && analysisResult && !molpropDetails && (
                  <Card className="shadow-md mt-4 border-dashed">
                     <CardContent className="pt-6 text-center text-muted-foreground">
-                       No DeepPurpose prediction was generated or requested for this analysis.
+                       No Molprop prediction was generated or requested for this analysis.
                     </CardContent>
                 </Card>
              )}
@@ -318,7 +303,7 @@ export function AnalysisForm() {
                {!isLoading && !analysisResult && !error && (
                  <Card className="shadow-md mt-4 border-dashed">
                     <CardContent className="pt-6 text-center text-muted-foreground">
-                       DeepPurpose prediction details will appear here if relevant to the analysis.
+                       Molprop prediction details will appear here if relevant to the analysis.
                     </CardContent>
                 </Card>
              )}
@@ -329,10 +314,9 @@ export function AnalysisForm() {
              <ResultsDisplay
                 results={analysisResult ? { analysis: analysisResult.synthesizedAnalysis } : null}
                 error={error}
-                isLoading={isAnalysisRunning && !analysisResult?.synthesizedAnalysis} // Loading until analysis text arrives
+                isLoading={isAnalysisRunning && !analysisResult?.synthesizedAnalysis}
                 />
-              {/* Placeholder when no analysis has run yet */}
-               {!isLoading && !analysisResult && !error && (
+              {!isLoading && !analysisResult && !error && (
                  <Card className="shadow-md mt-4 border-dashed">
                     <CardContent className="pt-6 text-center text-muted-foreground">
                        Synthesized analysis results will appear here after submitting the form.
