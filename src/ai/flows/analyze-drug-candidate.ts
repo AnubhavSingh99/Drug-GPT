@@ -12,8 +12,9 @@
 import { ai } from '@/ai/ai-instance';
 import { z } from 'genkit';
 import { getMoleculeBySmiles, type Molecule } from '@/services/pubchem';
-import { getDrugByName, type Drug, DrugSchema } from '@/services/chembl'; // Corrected import path
-import { getDeepPurposeAnalysis } from '@/services/deeppurpose';
+// Remove direct import from chembl service
+// import { type Drug, DrugSchema } from '@/services/chembl'; // REMOVED
+import { getDeepPurposeAnalysis } from '@/services/deeppurpose'; // Service function import remains
 
 // Define input schema
 const AnalyzeDrugCandidateInputSchema = z.object({
@@ -36,11 +37,23 @@ const DeepPurposeResultSchema = z.object({
 type DeepPurposeResult = z.infer<typeof DeepPurposeResultSchema>;
 
 
+// Define the ChEMBL Drug schema locally, as we no longer import it from the service
+const DrugSchema = z.object({
+    chemblId: z.string().describe('The ChEMBL ID.'),
+    name: z.string().describe('The compound name.'),
+    maxPhase: z.number().nullable().optional().describe('The maximum phase a drug has reached in clinical trials (0-4).'),
+    molecularWeight: z.number().optional().describe('The molecular weight.'),
+    molecularFormula: z.string().optional().describe('The molecular formula.'),
+    description: z.string().optional().describe('Drug description, which could contain indications or therapeutic flags.'),
+});
+type Drug = z.infer<typeof DrugSchema>;
+
+
 // Define the structured output schema
 const AnalyzeDrugCandidateOutputSchema = z.object({
   synthesizedAnalysis: z.string().describe('The overall synthesized analysis addressing the user query, incorporating information from all relevant tools used.'),
-  // Use the imported DrugSchema from chembl.ts
-  chemblData: z.nullable(DrugSchema).describe('Information retrieved from ChEMBL, if applicable.'),
+  // Use the locally defined DrugSchema
+  chemblData: z.nullable(DrugSchema).describe('Information retrieved from ChEMBL (via Firebase API), if applicable.'),
   deepPurposeData: z.nullable(DeepPurposeResultSchema).describe('Prediction results from the DeepPurpose analysis.'),
 });
 export type AnalyzeDrugCandidateOutput = z.infer<typeof AnalyzeDrugCandidateOutputSchema>;
@@ -53,7 +66,6 @@ const pubChemTool = ai.defineTool({
   inputSchema: z.object({
     smiles: z.string().describe('The SMILES string of the molecule to search for.'),
   }),
-  // Output schema represents the *service* output, not the flow's final output
   outputSchema: z.object({
     cid: z.number().describe('The PubChem CID (Compound Identifier).'),
     molecularFormula: z.string().describe('The molecular formula.'),
@@ -70,7 +82,6 @@ async input => {
     throw new Error(`PubChem tool execution failed: Could not retrieve molecule for SMILES: ${input.smiles}`);
   }
   console.log(`PubChem Tool successfully returned data for SMILES: ${input.smiles}`);
-  // Ensure the returned object matches the outputSchema structure
   return {
     cid: molecule.cid,
     molecularFormula: molecule.molecularFormula,
@@ -80,33 +91,57 @@ async input => {
   };
 });
 
-// Updated tool for ChEMBL
+// Updated tool for ChEMBL - now calls the internal API route
 const chemblTool = ai.defineTool({
-  name: 'getDrugByNameFromChEMBL',
-  description: 'Retrieves known drug/compound information from ChEMBL based on a name. Use this tool if the molecule identified by PubChem has an IUPAC name that suggests it might be a known compound/drug, or if the user\'s query explicitly mentions a drug name.',
+  name: 'getDrugByNameFromDatabase', // Renamed tool slightly for clarity
+  description: 'Retrieves known drug/compound information from our internal database (via API) based on a name. Use this tool if the molecule identified by PubChem has an IUPAC name that suggests it might be a known compound/drug, or if the user\'s query explicitly mentions a drug name.',
   inputSchema: z.object({
-    drugName: z.string().describe('The name of the drug/compound to search for in ChEMBL.'),
+    drugName: z.string().describe('The name of the drug/compound to search for in the database.'),
   }),
-  outputSchema: z.nullable(DrugSchema), // Use the imported ChEMBL Drug schema
+  outputSchema: z.nullable(DrugSchema), // Use the locally defined ChEMBL Drug schema
 },
 async input => {
-  console.log(`ChEMBL Tool called with Name: ${input.drugName}`);
-  const drug = await getDrugByName(input.drugName); // Calls the ChEMBL service function
-  if (!drug) {
-    console.log(`ChEMBL tool did not find data for name: ${input.drugName}. Returning null.`);
-    return null;
-  }
-   try {
-      // Ensure the returned object matches the DrugSchema before returning
-      const validatedDrug = DrugSchema.parse(drug);
-      console.log(`ChEMBL Tool successfully returned validated data for name: ${input.drugName}`);
+  console.log(`Database Tool called with Name: ${input.drugName}`);
+  try {
+      // Construct the full URL to the API route
+      // Assumes the app is running on localhost:9002 during development
+      // In production, this needs to be the actual deployed URL
+      const apiUrl = process.env.NODE_ENV === 'production'
+         ? `${process.env.NEXT_PUBLIC_APP_URL}/api/data` // Use an env var for the deployed URL
+         : `http://localhost:9002/api/data`; // Adjust port if needed
+
+      console.log(`Calling API: ${apiUrl}?drugName=${encodeURIComponent(input.drugName)}`);
+      const response = await fetch(`${apiUrl}?drugName=${encodeURIComponent(input.drugName)}`);
+
+      if (!response.ok) {
+        // Handle non-2xx responses (like 404 Not Found)
+        if (response.status === 404) {
+           console.log(`Database tool: API returned 404, drug "${input.drugName}" not found.`);
+           return null; // Return null if not found
+        }
+        console.error(`Database tool: API request failed with status ${response.status} for drug: ${input.drugName}`);
+        throw new Error(`API request failed with status ${response.status}`); // Throw error for other failures
+      }
+
+      const drugData = await response.json();
+
+      // The API route now returns the drug object directly or an error/message
+      if (!drugData || drugData.error || drugData.message) {
+         console.log(`Database tool: API did not return valid data for drug: ${input.drugName}. Response:`, drugData);
+         return null; // Return null if API indicates error or no data
+      }
+
+      // Validate the received data against the local DrugSchema
+      const validatedDrug = DrugSchema.parse(drugData);
+      console.log(`Database Tool successfully returned validated data for name: ${input.drugName}`);
       return validatedDrug;
-   } catch (validationError) {
-      console.error(`ChEMBL tool returned data failed validation for ${input.drugName}:`, validationError, "Raw data:", drug);
-      // Throw an error or return null? Returning null might be safer for flow continuation.
-      // throw new Error(`ChEMBL tool output validation failed: ${validationError}`);
-      return null;
-   }
+
+  } catch (error: any) {
+       console.error(`Database tool execution failed for drug "${input.drugName}":`, error);
+       // Don't throw here, allow the flow to report it as a null result
+       // throw new Error(`Database tool execution failed: ${error.message}`);
+       return null; // Return null on any error during API call or parsing
+  }
 });
 
 const deepPurposeTool = ai.defineTool({
@@ -124,14 +159,12 @@ async input => {
      console.log(`DeepPurpose tool did not generate prediction for SMILES: ${input.smiles}. Returning null.`);
      return null;
    }
-   // Validate the structure returned by the service function against the local schema
     try {
         const validatedAnalysis = DeepPurposeResultSchema.parse(analysis);
         console.log(`DeepPurpose Tool successfully returned validated prediction for SMILES: ${input.smiles}`);
         return validatedAnalysis;
     } catch (validationError) {
         console.error(`DeepPurpose tool returned data failed validation for SMILES ${input.smiles}:`, validationError, "Raw data:", analysis);
-        // Decide if to throw or return null. Returning null might be safer for the flow.
         return null;
     }
 });
@@ -140,7 +173,8 @@ async input => {
 // Define the prompt - focus on generating the synthesized analysis text
 const analysisPrompt = ai.definePrompt({
   name: 'analysisPrompt',
-  tools: [pubChemTool, chemblTool, deepPurposeTool], // Updated tool list
+  // Updated tool name in the list
+  tools: [pubChemTool, chemblTool, deepPurposeTool],
   input: {
     schema: z.object({
       smiles: z.string().describe('The SMILES string of the drug candidate.'),
@@ -150,11 +184,11 @@ const analysisPrompt = ai.definePrompt({
     }),
   },
   output: {
-    // The prompt output focuses *only* on the synthesized text analysis
     schema: z.object({
       synthesizedAnalysis: z.string().describe('The comprehensive textual analysis of the drug candidate, synthesizing information from relevant tools used and addressing the user query.'),
     }),
   },
+  // Updated prompt text to refer to 'Database' or 'ChEMBL Database' instead of just 'ChEMBL'
   prompt: `You are an expert pharmaceutical researcher specializing in early-stage drug discovery analysis.
 
   A user has submitted a drug candidate for analysis.
@@ -163,13 +197,13 @@ const analysisPrompt = ai.definePrompt({
   User Query: {{{query}}}
 
   Instructions:
-  1.  **Foundation:** You have access to tools: 'getMoleculeBySmiles' (for basic chemical data), 'getDrugByNameFromChEMBL' (for known compound info from ChEMBL), and 'getDeepPurposeAnalysis' (for functional prediction). Assume the essential 'getMoleculeBySmiles' has already been successfully called if an IUPAC name '{{pubChemName}}' is provided; otherwise, you *must* call it first. If it fails, report that limitation clearly.
-  2.  **Tool Strategy:** Based on the user query "{{{query}}}" and the basic chemical data (especially the IUPAC name '{{pubChemName}}', if available), decide *if* you need to use 'getDrugByNameFromChEMBL' (e.g., if the name looks like a known compound or the query asks about known drugs/compounds) and *if* you need 'getDeepPurposeAnalysis' (e.g., if the query asks about function, mechanism, or potential use). Use the tools *only* if relevant to the query.
+  1.  **Foundation:** You have access to tools: 'getMoleculeBySmiles' (for basic chemical data from PubChem), 'getDrugByNameFromDatabase' (for known compound info from our internal ChEMBL database), and 'getDeepPurposeAnalysis' (for functional prediction). Assume the essential 'getMoleculeBySmiles' has already been successfully called if an IUPAC name '{{pubChemName}}' is provided; otherwise, you *must* call it first. If it fails, report that limitation clearly.
+  2.  **Tool Strategy:** Based on the user query "{{{query}}}" and the basic chemical data (especially the IUPAC name '{{pubChemName}}', if available), decide *if* you need to use 'getDrugByNameFromDatabase' (e.g., if the name looks like a known compound or the query asks about known drugs/compounds) and *if* you need 'getDeepPurposeAnalysis' (e.g., if the query asks about function, mechanism, or potential use). Use the tools *only* if relevant to the query.
   3.  **Synthesize:** Generate a comprehensive textual analysis that directly answers the user's query: "{{{query}}}".
-      *   Integrate findings *only* from the tools you decided to use and that returned data successfully. Clearly state the source (e.g., "PubChem indicates...", "ChEMBL suggests...", "DeepPurpose predicts...").
-      *   If a tool returns no data (e.g., 'getDrugByNameFromChEMBL' finds no matching compound or returns null), explicitly state that in your analysis (e.g., "No information was found in ChEMBL for this compound name."). Do not invent data.
+      *   Integrate findings *only* from the tools you decided to use and that returned data successfully. Clearly state the source (e.g., "PubChem indicates...", "Our ChEMBL database suggests...", "DeepPurpose predicts...").
+      *   If a tool returns no data (e.g., 'getDrugByNameFromDatabase' finds no matching compound or returns null), explicitly state that in your analysis (e.g., "No information was found in our ChEMBL database for this compound name."). Do not invent data.
       *   If a target protein ({{{targetProtein}}}) was provided, discuss the candidate's potential relevance to it, drawing connections from the available data (structure, properties, predicted purpose).
-      *   If a tool fails due to an error during its execution (which will be reported back to you), explicitly mention this limitation in your analysis (e.g., "The PubChem tool failed to retrieve data.").
+      *   If a tool fails due to an error during its execution (which will be reported back to you), explicitly mention this limitation in your analysis (e.g., "The PubChem tool failed to retrieve data." or "The database lookup tool failed.").
   4.  **Focus:** Your primary output is the single 'synthesizedAnalysis' text block. Do not output raw tool data in this text. The calling function will handle gathering the raw tool outputs separately.
 
   Return ONLY the final, synthesized analysis text.
@@ -189,11 +223,10 @@ const analyzeDrugCandidateFlow = ai.defineFlow<
 
   let pubChemData: Molecule | null = null;
   let chemblData: Drug | null = null; // Variable holds parsed ChEMBL data
-  let deepPurposeData: DeepPurposeResult | null = null; // Variable holds parsed DeepPurpose data
-  let synthesizedAnalysis = "Analysis could not be completed."; // Default analysis
+  let deepPurposeData: DeepPurposeResult | null = null;
+  let synthesizedAnalysis = "Analysis could not be completed.";
 
   try {
-    // Step 1: Always get PubChem data first (critical for context)
     console.log(`Step 1: Fetching PubChem data for SMILES: ${input.smiles}`);
     pubChemData = await getMoleculeBySmiles(input.smiles);
 
@@ -203,21 +236,18 @@ const analyzeDrugCandidateFlow = ai.defineFlow<
     }
     console.log('Step 1: PubChem data fetched successfully:', JSON.stringify(pubChemData));
 
-    // Step 2: Run the analysis prompt, providing PubChem name as context
     const llmInput = {
       ...input,
-      smiles: pubChemData.canonicalSmiles, // Use canonical SMILES
+      smiles: pubChemData.canonicalSmiles,
       pubChemName: pubChemData.iupacName,
     };
     console.log('Step 2: Calling analysisPrompt with LLM input:', JSON.stringify(llmInput));
 
-    // Call the prompt directly. Genkit handles tool execution and provides history.
     const promptResult = await analysisPrompt(llmInput);
     const llmOutput = promptResult.output;
-    const history = promptResult.history; // Access history from the result
+    const history = promptResult.history;
 
     console.log('Step 2: analysisPrompt response received.');
-    // Log history for debugging tool calls
     console.log('Prompt History:', JSON.stringify(history, null, 2));
 
 
@@ -228,78 +258,65 @@ const analyzeDrugCandidateFlow = ai.defineFlow<
      synthesizedAnalysis = llmOutput.synthesizedAnalysis;
      console.log('Step 2: Received synthesized analysis:', synthesizedAnalysis);
 
-    // Step 3: Extract structured data from the LLM's tool calls in history
     console.log("Step 3: Extracting structured data from history...");
     if (history) {
       for (const event of history) {
-         // Check for successful tool responses containing output
         if (event.type === 'toolRequest' && event.toolRequest.toolResponse && event.toolRequest.toolResponse.output) {
           const toolName = event.toolRequest.name;
-          const toolOutput = event.toolRequest.toolResponse.output; // This is the actual data returned by the tool function
+          const toolOutput = event.toolRequest.toolResponse.output;
           console.log(`Found successful tool response for '${toolName}':`, JSON.stringify(toolOutput));
 
-           // Important: Check if toolOutput is actually present and not null/undefined before parsing
-           if (toolOutput != null) { // Check for both null and undefined
-               if (toolName === 'getDrugByNameFromChEMBL') {
+           if (toolOutput != null) {
+               // Updated tool name check
+               if (toolName === 'getDrugByNameFromDatabase') {
                  try {
-                   // Validate the output against the imported ChEMBL Drug schema.
-                   // The tool itself should have already validated, but double-check here.
-                   chemblData = DrugSchema.parse(toolOutput); // Parse the actual output
-                   console.log('analyzeDrugCandidateFlow: Successfully parsed ChEMBL data:', JSON.stringify(chemblData));
+                   chemblData = DrugSchema.parse(toolOutput);
+                   console.log('analyzeDrugCandidateFlow: Successfully parsed ChEMBL (Database) data:', JSON.stringify(chemblData));
                  } catch (validationError) {
-                   console.warn(`analyzeDrugCandidateFlow: Failed to validate ChEMBL tool output (should have been validated by tool). Error:`, validationError, 'Raw Output:', toolOutput);
-                   chemblData = null; // Keep as null if validation fails unexpectedly here
+                   console.warn(`analyzeDrugCandidateFlow: Failed to validate Database tool output. Error:`, validationError, 'Raw Output:', toolOutput);
+                   chemblData = null;
                  }
                } else if (toolName === 'getDeepPurposeAnalysis') {
                  try {
-                   // Validate the output against the local DeepPurpose schema.
-                   // Tool should have validated, double-check.
-                   deepPurposeData = DeepPurposeResultSchema.parse(toolOutput); // Parse the actual output
+                   deepPurposeData = DeepPurposeResultSchema.parse(toolOutput);
                    console.log('analyzeDrugCandidateFlow: Successfully parsed DeepPurpose data:', JSON.stringify(deepPurposeData));
                  } catch (validationError) {
-                   console.warn(`analyzeDrugCandidateFlow: Failed to validate DeepPurpose tool output (should have been validated by tool). Error:`, validationError, 'Raw Output:', toolOutput);
-                   deepPurposeData = null; // Keep as null if validation fails unexpectedly here
+                   console.warn(`analyzeDrugCandidateFlow: Failed to validate DeepPurpose tool output. Error:`, validationError, 'Raw Output:', toolOutput);
+                   deepPurposeData = null;
                  }
                }
-               // PubChem data is fetched initially, no need to extract from tool history unless verifying
            } else {
               console.log(`Tool '${toolName}' returned null or undefined output, skipping parsing.`);
-               // Explicitly set corresponding data variable to null if the tool returned null
-               if (toolName === 'getDrugByNameFromChEMBL') chemblData = null;
+               // Updated tool name check
+               if (toolName === 'getDrugByNameFromDatabase') chemblData = null;
                if (toolName === 'getDeepPurposeAnalysis') deepPurposeData = null;
            }
         } else if (event.type === 'toolRequest' && event.toolRequest.toolResponse?.error) {
-             // Log if a tool call resulted in an error during execution
             console.warn(`analyzeDrugCandidateFlow: Tool '${event.toolRequest.name}' execution failed with error:`, event.toolRequest.toolResponse.error);
         } else if (event.type === 'toolRequest' && !event.toolRequest.toolResponse) {
              console.warn(`analyzeDrugCandidateFlow: Tool request for '${event.toolRequest.name}' found in history, but no response recorded.`);
-        } else if (event.type !== 'toolRequest'){
-             // console.log(`History Event: Type=${event.type}`); // Log other event types if needed
         }
       }
     } else {
         console.warn("analyzeDrugCandidateFlow: No history found for tool call extraction.");
     }
-    console.log("Step 3: Finished extracting structured data. ChEMBL:", JSON.stringify(chemblData), "DeepPurpose:", JSON.stringify(deepPurposeData));
+    console.log("Step 3: Finished extracting structured data. ChEMBL (Database):", JSON.stringify(chemblData), "DeepPurpose:", JSON.stringify(deepPurposeData));
 
-    // Return the combined structured output
     const finalOutput = {
       synthesizedAnalysis,
-      chemblData, // Contains parsed ChEMBL data or null
-      deepPurposeData, // Contains parsed DeepPurpose data or null
+      chemblData,
+      deepPurposeData,
     };
     console.log("analyzeDrugCandidateFlow: Returning final output:", JSON.stringify(finalOutput));
     return finalOutput;
 
   } catch (error: any) {
     console.error('Error during analyzeDrugCandidateFlow execution:', error);
-    // Ensure the error message is propagated correctly
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(errorMessage); // Re-throw with a clear message
+    throw new Error(errorMessage);
   }
 });
 
-// Export the wrapper function
 export async function analyzeDrugCandidate(input: AnalyzeDrugCandidateInput): Promise<AnalyzeDrugCandidateOutput> {
   console.log('Calling analyzeDrugCandidate wrapper with input:', JSON.stringify(input));
   try {
@@ -308,8 +325,6 @@ export async function analyzeDrugCandidate(input: AnalyzeDrugCandidateInput): Pr
     return result;
   } catch (error) {
      console.error('analyzeDrugCandidate wrapper caught error:', error);
-     // Re-throw the error to be handled by the calling component
      throw error;
   }
 }
-

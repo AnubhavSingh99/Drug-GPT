@@ -1,36 +1,33 @@
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
-// Add imports for the specific Firebase services you want to use
-// e.g., import { getFirestore } from "firebase/firestore";
-// e.g., import { getAuth } from "firebase/auth";
+import { getDatabase } from "firebase/database"; // Import Realtime Database
+import { getAuth } from "firebase/auth"; // Import Auth if needed
 
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID, // Optional
+  apiKey: "AIzaSyDFL9sommPTbMQD2emw8u-oHOiOJ7uw2i0", // Use provided key
+  authDomain: "medigraph-a0945.firebaseapp.com", // Use provided domain
+  databaseURL: "https://medigraph-a0945-default-rtdb.firebaseio.com", // Use provided database URL
+  projectId: "medigraph-a0945", // Use provided project ID
+  storageBucket: "medigraph-a0945.firebasestorage.app", // Use provided storage bucket
+  messagingSenderId: "548192566469", // Use provided sender ID
+  appId: "1:548192566469:web:8d470d5ebbe99c174dc4ac", // Use provided app ID
+  measurementId: "G-D8F1JBCQXE" // Use provided measurement ID
 };
 
 // Initialize Firebase
 // Check if Firebase has already been initialized to prevent errors
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// Export the initialized app and specific service instances if needed
-// e.g., export const db = getFirestore(app);
-// e.g., export const auth = getAuth(app);
+// Initialize and export Realtime Database instance
+const database = getDatabase(app);
 
-export { app };
+// Initialize and export Auth instance (optional, if needed)
+const auth = getAuth(app);
 
-// Example of exporting a specific service (uncomment and adapt as needed):
-/*
-import { getFirestore } from "firebase/firestore";
-export const db = getFirestore(app);
-*/
 
-/*
-import { getAuth } from "firebase/auth";
-export const auth = getAuth(app);
-*/
+export { app, database, auth };
+
+// Analytics is often initialized separately if needed, e.g., in a specific component or layout
+// import { getAnalytics } from "firebase/analytics";
+// const analytics = getAnalytics(app);
+// export { analytics };

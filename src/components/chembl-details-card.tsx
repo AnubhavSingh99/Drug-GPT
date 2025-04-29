@@ -1,28 +1,42 @@
 
 'use client';
 
-import type { Drug } from '@/services/chembl'; // Updated import path
+// Import the locally defined Drug type from the flow file or a shared types file
+// For simplicity, let's assume Drug type definition is accessible here or defined locally
+// If defined in flow: import type { Drug } from '@/ai/flows/analyze-drug-candidate';
+// For this example, let's assume a local definition or it's imported correctly.
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Pill, FileText, Database } from 'lucide-react'; // Replaced Loader2 with Database icon for source
+import { Database, Pill, FileText } from 'lucide-react'; // Keep Database icon
 import { Skeleton } from "@/components/ui/skeleton";
 
-interface ChemblDetailsCardProps { // Renamed interface
-  drug: Drug | null | undefined; // Type remains the same, just imported from chembl service
+// Define Drug type here if not imported from elsewhere
+interface Drug {
+  chemblId: string;
+  name: string;
+  maxPhase?: number | null; // Allow null from DB
+  molecularWeight?: number;
+  molecularFormula?: string;
+  description?: string;
+}
+
+
+interface ChemblDetailsCardProps {
+  drug: Drug | null | undefined; // Use the correct Drug type
   isLoading: boolean; // Indicates if the analysis flow is running AND results haven't been received yet
 }
 
-export function ChemblDetailsCard({ drug, isLoading }: ChemblDetailsCardProps) { // Renamed component
-  // Show skeleton only if isLoading is true (meaning analysis flow is running and we are waiting for results).
+export function ChemblDetailsCard({ drug, isLoading }: ChemblDetailsCardProps) {
   if (isLoading) {
     return (
-      <Card className="shadow-md animate-pulse mt-4"> {/* Added mt-4 */}
+      <Card className="shadow-md animate-pulse mt-4">
         <CardHeader>
           <CardTitle className="text-xl flex items-center">
-            <Database className="mr-2 h-5 w-5 text-muted-foreground" /> {/* Changed icon */}
-            ChEMBL Information {/* Updated title */}
+            <Database className="mr-2 h-5 w-5 text-muted-foreground" />
+            Database Information {/* Updated title */}
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 pt-4"> {/* Added pt-4 */}
+        <CardContent className="space-y-3 pt-4">
           <div className="flex justify-between items-center space-x-4">
             <Skeleton className="h-4 w-1/4" />
             <Skeleton className="h-4 w-1/2" />
@@ -46,25 +60,22 @@ export function ChemblDetailsCard({ drug, isLoading }: ChemblDetailsCardProps) {
     );
   }
 
-  // If loading is finished and there is no drug data (explicitly null or undefined),
-  // we don't render the card here. The parent TabsContent should handle the "No data found" message.
   if (!drug) {
-    return null;
+    return null; // Parent handles "No data found"
   }
 
-  // If we have drug data (and isLoading is false)
   return (
-    <Card className="shadow-md mt-4"> {/* Added mt-4 */}
+    <Card className="shadow-md mt-4">
       <CardHeader>
         <CardTitle className="text-xl flex items-center">
-          <Database className="mr-2 h-5 w-5 text-primary" /> {/* Changed icon */}
-          ChEMBL Information {/* Updated title */}
+          <Database className="mr-2 h-5 w-5 text-primary" />
+           Database Information {/* Updated title */}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3 pt-4 text-sm"> {/* Added pt-4 */}
+      <CardContent className="space-y-3 pt-4 text-sm">
         <div className="flex justify-between">
-          <span className="font-medium text-muted-foreground">ChEMBL ID:</span> {/* Updated label */}
-          <span className="font-mono">{drug.chemblId}</span> {/* Updated field */}
+          <span className="font-medium text-muted-foreground">ChEMBL ID:</span>
+          <span className="font-mono">{drug.chemblId || 'N/A'}</span> {/* Handle potential missing ID */}
         </div>
         <div className="flex justify-between">
           <span className="font-medium text-muted-foreground">Name:</span>
@@ -75,7 +86,7 @@ export function ChemblDetailsCard({ drug, isLoading }: ChemblDetailsCardProps) {
              <span className="font-medium text-muted-foreground block mb-1 flex items-center">
                 <FileText className="mr-1.5 h-4 w-4" /> Description / Indication:
             </span>
-             <p className="whitespace-pre-wrap text-foreground/90">{drug.description}</p> {/* Slightly muted description */}
+             <p className="whitespace-pre-wrap text-foreground/90">{drug.description}</p>
            </div>
          )}
          {drug.molecularFormula && (
@@ -85,15 +96,16 @@ export function ChemblDetailsCard({ drug, isLoading }: ChemblDetailsCardProps) {
             </div>
          )}
          {/* Check specifically for maxPhase as weight might not always be present */}
-         {drug.maxPhase !== undefined && drug.maxPhase !== null && (
+         {(drug.maxPhase !== undefined && drug.maxPhase !== null) && (
             <div className="flex justify-between">
              <span className="font-medium text-muted-foreground">Max Phase:</span>
-             <span>{drug.maxPhase}</span>
+             {/* Display 'N/A' or similar if maxPhase is 0 or null, otherwise display the number */}
+             <span>{drug.maxPhase > 0 ? drug.maxPhase : 'N/A'}</span>
             </div>
          )}
          {drug.molecularWeight !== undefined && drug.molecularWeight !== null && (
            <div className="flex justify-between">
-             <span className="font-medium text-muted-foreground">Mol. Weight:</span> {/* Abbreviated label */}
+             <span className="font-medium text-muted-foreground">Mol. Weight:</span>
              <span>{drug.molecularWeight.toFixed(3)} g/mol</span>
            </div>
          )}
