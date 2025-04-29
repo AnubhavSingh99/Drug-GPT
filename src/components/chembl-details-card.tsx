@@ -1,25 +1,25 @@
 
 'use client';
 
-import type { Drug } from '@/services/drugbank';
+import type { Drug } from '@/services/chembl'; // Updated import path
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Pill, FileText, Loader2 } from 'lucide-react'; // Using Pill and FileText icons
+import { Pill, FileText, Database } from 'lucide-react'; // Replaced Loader2 with Database icon for source
 import { Skeleton } from "@/components/ui/skeleton";
 
-interface DrugBankDetailsCardProps {
-  drug: Drug | null | undefined; // Accept null or undefined
+interface ChemblDetailsCardProps { // Renamed interface
+  drug: Drug | null | undefined; // Type remains the same, just imported from chembl service
   isLoading: boolean; // Indicates if the analysis flow is running AND results haven't been received yet
 }
 
-export function DrugBankDetailsCard({ drug, isLoading }: DrugBankDetailsCardProps) {
+export function ChemblDetailsCard({ drug, isLoading }: ChemblDetailsCardProps) { // Renamed component
   // Show skeleton only if isLoading is true (meaning analysis flow is running and we are waiting for results).
   if (isLoading) {
     return (
       <Card className="shadow-md animate-pulse mt-4"> {/* Added mt-4 */}
         <CardHeader>
           <CardTitle className="text-xl flex items-center">
-            <Pill className="mr-2 h-5 w-5 text-muted-foreground" />
-            DrugBank Information
+            <Database className="mr-2 h-5 w-5 text-muted-foreground" /> {/* Changed icon */}
+            ChEMBL Information {/* Updated title */}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 pt-4"> {/* Added pt-4 */}
@@ -57,14 +57,14 @@ export function DrugBankDetailsCard({ drug, isLoading }: DrugBankDetailsCardProp
     <Card className="shadow-md mt-4"> {/* Added mt-4 */}
       <CardHeader>
         <CardTitle className="text-xl flex items-center">
-          <Pill className="mr-2 h-5 w-5 text-primary" />
-          DrugBank Information
+          <Database className="mr-2 h-5 w-5 text-primary" /> {/* Changed icon */}
+          ChEMBL Information {/* Updated title */}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 pt-4 text-sm"> {/* Added pt-4 */}
         <div className="flex justify-between">
-          <span className="font-medium text-muted-foreground">DrugBank ID:</span>
-          <span className="font-mono">{drug.drugbankId}</span>
+          <span className="font-medium text-muted-foreground">ChEMBL ID:</span> {/* Updated label */}
+          <span className="font-mono">{drug.chemblId}</span> {/* Updated field */}
         </div>
         <div className="flex justify-between">
           <span className="font-medium text-muted-foreground">Name:</span>
@@ -84,15 +84,20 @@ export function DrugBankDetailsCard({ drug, isLoading }: DrugBankDetailsCardProp
               <span className="font-mono">{drug.molecularFormula}</span>
             </div>
          )}
-         {drug.averageMolecularWeight !== undefined && (
+         {/* Check specifically for maxPhase as weight might not always be present */}
+         {drug.maxPhase !== undefined && drug.maxPhase !== null && (
+            <div className="flex justify-between">
+             <span className="font-medium text-muted-foreground">Max Phase:</span>
+             <span>{drug.maxPhase}</span>
+            </div>
+         )}
+         {drug.molecularWeight !== undefined && drug.molecularWeight !== null && (
            <div className="flex justify-between">
-             <span className="font-medium text-muted-foreground">Avg. Mol. Weight:</span>
-             <span>{drug.averageMolecularWeight.toFixed(3)} g/mol</span>
+             <span className="font-medium text-muted-foreground">Mol. Weight:</span> {/* Abbreviated label */}
+             <span>{drug.molecularWeight.toFixed(3)} g/mol</span>
            </div>
          )}
       </CardContent>
     </Card>
   );
 }
-
-    

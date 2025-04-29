@@ -17,7 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ResultsDisplay } from '@/components/results-display';
 import { PubChemDetailsCard } from '@/components/pubchem-details-card';
 import { DeepPurposeDetailsCard } from '@/components/deeppurpose-details-card'; // New component
-import { DrugBankDetailsCard } from '@/components/drugbank-details-card'; // New component
+import { ChemblDetailsCard } from '@/components/chembl-details-card'; // Updated component import
 import { Loader2, TestTubeDiagonal, Target } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import dynamic from 'next/dynamic';
@@ -167,7 +167,7 @@ export function AnalysisForm() {
   // Determine if tabs should be enabled based on loading state and data presence
   const isPubChemTabDisabled = !pubChemDetails && loadingStage !== 'pubchem';
   const isAnalysisRunning = loadingStage === 'analysis';
-  const isDrugBankTabDisabled = (!analysisResult?.drugBankData && !isAnalysisRunning) || isLoading;
+  const isChemblTabDisabled = (!analysisResult?.chemblData && !isAnalysisRunning) || isLoading; // Updated variable name
   const isDeepPurposeTabDisabled = (!analysisResult?.deepPurposeData && !isAnalysisRunning) || isLoading;
   const isAnalysisTabDisabled = (!analysisResult?.synthesizedAnalysis && !isAnalysisRunning && !error) || isLoading;
 
@@ -272,7 +272,7 @@ export function AnalysisForm() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
            <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="pubchem" disabled={isPubChemTabDisabled && !isLoading}>PubChem</TabsTrigger>
-            <TabsTrigger value="drugbank" disabled={isDrugBankTabDisabled}>DrugBank</TabsTrigger>
+            <TabsTrigger value="chembl" disabled={isChemblTabDisabled}>ChEMBL</TabsTrigger> {/* Updated tab name */}
             <TabsTrigger value="deeppurpose" disabled={isDeepPurposeTabDisabled}>DeepPurpose</TabsTrigger>
             <TabsTrigger value="analysis" disabled={isAnalysisTabDisabled}>Analysis</TabsTrigger>
           </TabsList>
@@ -290,20 +290,20 @@ export function AnalysisForm() {
              )}
           </TabsContent>
 
-          {/* DrugBank Tab Content */}
-           <TabsContent value="drugbank">
+          {/* ChEMBL Tab Content */}
+           <TabsContent value="chembl"> {/* Updated tab value */}
               {/* Show card only if loading or data exists */}
-              {(isAnalysisRunning || analysisResult?.drugBankData) && (
-                 <DrugBankDetailsCard
-                    drug={analysisResult?.drugBankData}
+              {(isAnalysisRunning || analysisResult?.chemblData) && ( // Updated data check
+                 <ChemblDetailsCard // Updated component name
+                    drug={analysisResult?.chemblData} // Updated prop name
                     isLoading={isAnalysisRunning && !analysisResult} // Loading if analysis is running AND we don't have results yet
                 />
               )}
-              {/* Message if analysis ran but no DrugBank data was found/returned */}
-              {!isLoading && analysisResult && !analysisResult.drugBankData && (
+              {/* Message if analysis ran but no ChEMBL data was found/returned */}
+              {!isLoading && analysisResult && !analysisResult.chemblData && ( // Updated data check
                  <Card className="shadow-md mt-4 border-dashed">
                     <CardContent className="pt-6 text-center text-muted-foreground">
-                        No relevant DrugBank information was found or requested for this analysis.
+                        No relevant ChEMBL information was found or requested for this analysis. {/* Updated text */}
                     </CardContent>
                 </Card>
              )}
@@ -311,7 +311,7 @@ export function AnalysisForm() {
                {!isLoading && !analysisResult && !error && !pubChemDetails && (
                  <Card className="shadow-md mt-4 border-dashed">
                     <CardContent className="pt-6 text-center text-muted-foreground">
-                       DrugBank details will appear here if relevant to the analysis.
+                       ChEMBL details will appear here if relevant to the analysis. {/* Updated text */}
                     </CardContent>
                 </Card>
              )}
@@ -365,6 +365,3 @@ export function AnalysisForm() {
     </div>
   );
 }
-
-
-    
