@@ -19,6 +19,11 @@ export const ai = genkit({
     apiKey ? googleAI({ apiKey }) : undefined,
   ].filter(Boolean) as any, // Filter out undefined plugin if key is missing
   logLevel: 'debug', // Enable debug logging for more details
-  // Consider setting a default model or handling model selection more robustly
-  // model: 'googleai/gemini-1.5-flash', // Example model, ensure it's appropriate
+  // Explicitly set a default model to be used if not specified in the prompt/flow
+  model: apiKey ? 'googleai/gemini-1.5-flash' : undefined,
 });
+
+// If no API key is provided, log a warning that no model is configured
+if (!apiKey) {
+  console.warn('Warning: No Google AI API key provided, so no default model is configured. AI calls will fail.');
+}
